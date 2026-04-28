@@ -19,8 +19,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 			return m, nil
 		case "ctrl+f":
-			m.zone = ZoneForm
-			m.SetStatus(StatusIdle, "Connection form focused.")
+			m.FocusForm()
 			return m, nil
 		case "ctrl+r":
 			if !m.SelectNextProfile() {
@@ -39,17 +38,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			m.focus--
-			if m.focus < 0 {
-				m.focus = len(m.fields) - 1
-			}
-			for i := range m.fields {
-				if i == m.focus {
-					m.fields[i].input.Focus()
-					continue
-				}
-				m.fields[i].input.Blur()
-			}
+			m.moveFieldFocus(-1)
 			return m, nil
 		case "down", "j":
 			if m.zone == ZoneProfiles {
@@ -58,17 +47,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			m.focus++
-			if m.focus >= len(m.fields) {
-				m.focus = 0
-			}
-			for i := range m.fields {
-				if i == m.focus {
-					m.fields[i].input.Focus()
-					continue
-				}
-				m.fields[i].input.Blur()
-			}
+			m.moveFieldFocus(1)
 			return m, nil
 		case "enter":
 			if m.zone == ZoneProfiles {
@@ -88,40 +67,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 				return m, func() tea.Msg { return SubmitMsg{} }
 			}
-			m.focus++
-			if m.focus >= len(m.fields) {
-				m.focus = 0
-			}
-			for i := range m.fields {
-				if i == m.focus {
-					m.fields[i].input.Focus()
-					continue
-				}
-				m.fields[i].input.Blur()
-			}
+			m.moveFieldFocus(1)
 		case "tab", "shift+tab":
 			if m.zone == ZoneProfiles {
 				return m, nil
 			}
 			if msg.String() == "shift+tab" {
-				m.focus--
+				m.moveFieldFocus(-1)
 			} else {
-				m.focus++
-			}
-
-			if m.focus >= len(m.fields) {
-				m.focus = 0
-			}
-			if m.focus < 0 {
-				m.focus = len(m.fields) - 1
-			}
-
-			for i := range m.fields {
-				if i == m.focus {
-					m.fields[i].input.Focus()
-					continue
-				}
-				m.fields[i].input.Blur()
+				m.moveFieldFocus(1)
 			}
 		}
 	}

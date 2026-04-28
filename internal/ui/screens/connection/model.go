@@ -155,12 +155,10 @@ func (m *Model) SetProfiles(profiles []domain.ConnectionProfile) {
 	if m.profileIdx >= len(profiles) {
 		m.profileIdx = len(profiles) - 1
 	}
-	if len(profiles) > 0 {
-		m.ApplyProfile(profiles[m.profileIdx])
-		if m.statusKind != StatusSuccess {
-			m.status = fmt.Sprintf("Loaded %d saved profile(s).", len(profiles))
-			m.statusKind = StatusIdle
-		}
+	m.ApplyProfile(profiles[m.profileIdx])
+	if m.statusKind != StatusSuccess {
+		m.status = fmt.Sprintf("Loaded %d saved profile(s).", len(profiles))
+		m.statusKind = StatusIdle
 	}
 }
 
@@ -180,27 +178,22 @@ func (m *Model) ApplyProfile(profile domain.ConnectionProfile) {
 }
 
 func (m *Model) SelectNextProfile() bool {
-	if len(m.profiles) == 0 {
-		return false
-	}
-
-	m.profileIdx++
-	if m.profileIdx >= len(m.profiles) {
-		m.profileIdx = 0
-	}
-
-	m.ApplyProfile(m.profiles[m.profileIdx])
-	m.statusKind = StatusIdle
-	m.status = fmt.Sprintf("Profile: %s", m.profiles[m.profileIdx].Name)
-	return true
+	return m.cycleProfile(1)
 }
 
 func (m *Model) SelectPrevProfile() bool {
+	return m.cycleProfile(-1)
+}
+
+func (m *Model) cycleProfile(delta int) bool {
 	if len(m.profiles) == 0 {
 		return false
 	}
 
-	m.profileIdx--
+	m.profileIdx += delta
+	if m.profileIdx >= len(m.profiles) {
+		m.profileIdx = 0
+	}
 	if m.profileIdx < 0 {
 		m.profileIdx = len(m.profiles) - 1
 	}
@@ -229,6 +222,32 @@ func (m *Model) FocusProfiles() bool {
 	m.zone = ZoneProfiles
 	m.SetStatus(StatusIdle, fmt.Sprintf("Profiles list focused. Current: %s", m.profiles[m.profileIdx].Name))
 	return true
+}
+
+func (m *Model) FocusForm() {
+	m.zone = ZoneForm
+	m.SetStatus(StatusIdle, "Connection form focused.")
+}
+
+func (m *Model) moveFieldFocus(delta int) {
+	m.focus += delta
+	if m.focus >= len(m.fields) {
+		m.focus = 0
+	}
+	if m.focus < 0 {
+		m.focus = len(m.fields) - 1
+	}
+	m.syncFieldFocus()
+}
+
+func (m *Model) syncFieldFocus() {
+	for i := range m.fields {
+		if i == m.focus {
+			m.fields[i].input.Focus()
+			continue
+		}
+		m.fields[i].input.Blur()
+	}
 }
 
 func profileName(user, host, port, database string) string {

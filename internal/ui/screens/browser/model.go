@@ -32,6 +32,14 @@ const (
 	FocusPreview FocusArea = "preview"
 )
 
+type ViewMode string
+
+const (
+	ModeBrowse ViewMode = "browse"
+	ModeRecord ViewMode = "record"
+	ModeEditor ViewMode = "editor"
+)
+
 type Model struct {
 	tables        []domain.DBObject
 	selected      int
@@ -46,8 +54,7 @@ type Model struct {
 	selectedRow   int
 	rowOffset     int
 	colOffset     int
-	expanded      bool
-	editorActive  bool
+	mode          ViewMode
 	editorMode    editorMode
 	editor        textarea.Model
 }
@@ -57,6 +64,7 @@ func New() Model {
 		status:        "No tables loaded.",
 		previewStatus: "Select a table to inspect its rows.",
 		focus:         FocusTables,
+		mode:          ModeBrowse,
 		editor:        newEditor(),
 	}
 }
@@ -73,13 +81,7 @@ func (m *Model) SetStatus(status string) {
 func (m *Model) SetTables(tables []domain.DBObject) {
 	m.tables = tables
 	m.selected = 0
-	m.preview = domain.QueryResult{}
-	m.previewError = ""
-	m.selectedRow = 0
-	m.rowOffset = 0
-	m.colOffset = 0
-	m.expanded = false
-	m.editorActive = false
+	m.resetPreviewState()
 	if len(tables) == 0 {
 		m.status = "No tables found."
 		return
@@ -90,36 +92,22 @@ func (m *Model) SetTables(tables []domain.DBObject) {
 
 func (m *Model) SetPreviewStatus(status string) {
 	m.previewStatus = status
-	m.previewError = ""
-	m.preview = domain.QueryResult{}
-	m.selectedRow = 0
-	m.rowOffset = 0
-	m.colOffset = 0
-	m.expanded = false
-	m.editorActive = false
+	m.resetPreviewState()
 }
 
 func (m *Model) SetPreview(table domain.DBObject, result domain.QueryResult) {
 	m.previewTable = &table
 	m.preview = result
+	m.resetPreviewNavigation()
+	m.mode = ModeBrowse
 	m.previewError = ""
-	m.selectedRow = 0
-	m.rowOffset = 0
-	m.colOffset = 0
-	m.expanded = false
-	m.editorActive = false
 	m.previewStatus = fmt.Sprintf("Showing %d rows from %s.%s", len(result.Rows), table.Schema, table.Name)
 }
 
 func (m *Model) SetPreviewError(table domain.DBObject, status string) {
 	m.previewTable = &table
-	m.preview = domain.QueryResult{}
+	m.resetPreviewState()
 	m.previewError = status
-	m.selectedRow = 0
-	m.rowOffset = 0
-	m.colOffset = 0
-	m.expanded = false
-	m.editorActive = false
 	m.previewStatus = "Failed to load table preview."
 }
 
@@ -189,12 +177,12 @@ func (m *Model) OpenEditor(mode editorMode) {
 
 	m.editor = newEditor()
 	m.editorMode = mode
-	m.editorActive = true
+	m.mode = ModeEditor
 	m.editor.SetValue(buildSQLTemplate(mode, table, m.preview.Columns, m.currentRow()))
 }
 
 func (m *Model) CloseEditor() {
-	m.editorActive = false
+	m.mode = ModeBrowse
 }
 
 func (m *Model) SetEditorSize(width, height int) {
@@ -210,4 +198,37 @@ func (m Model) currentRow() []string {
 		return nil
 	}
 	return row
+}
+
+func (m *Model) OpenRecordView() {
+	m.mode = ModeRecord
+}
+
+func (m *Model) CloseRecordView() {
+	m.mode = ModeBrowse
+}
+
+func (m Model) IsBrowsing() bool {
+	return m.mode == ModeBrowse
+}
+
+func (m Model) IsEditorOpen() bool {
+	return m.mode == ModeEditor
+}
+
+func (m Model) IsRecordOpen() bool {
+	return m.mode == ModeRecord
+}
+
+func (m *Model) resetPreviewState() {
+	m.preview = domain.QueryResult{}
+	m.previewError = ""
+	m.resetPreviewNavigation()
+	m.mode = ModeBrowse
+}
+
+func (m *Model) resetPreviewNavigation() {
+	m.selectedRow = 0
+	m.rowOffset = 0
+	m.colOffset = 0
 }

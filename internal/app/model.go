@@ -42,110 +42,11 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.connection.SetSize(msg.Width, msg.Height)
-		m.browser.SetSize(msg.Width, msg.Height)
-	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" {
-			return m, tea.Quit
-		}
-	case connection.SubmitMsg:
-		profile := m.connection.Profile()
-		m.connection.SetStatus(connection.StatusConnecting, "Connecting to database...")
-		return m, connectCmd(profile)
-	case connectSuccessMsg:
-		if m.activeConn != nil {
-			_ = m.activeConn.Close(m.connection.Context())
-		}
-		m.activeConn = msg.conn
-		profile := msg.profile
-		m.current = &profile
-		m.connection.SetStatus(connection.StatusSuccess, connection.SuccessMessage(msg.profile))
-		m.browser.SetStatus("Loading tables...")
-		m.screen = screenBrowser
-		return m, tea.Batch(
-			listTablesCmd(msg.conn),
-			saveProfileCmd(msg.profile),
-		)
-	case connectErrorMsg:
-		m.connection.SetStatus(connection.StatusError, msg.err.Error())
-		return m, nil
-	case profilesLoadedMsg:
-		if msg.err != nil {
-			m.connection.SetStatus(connection.StatusError, msg.err.Error())
-			return m, nil
-		}
-		m.connection.SetProfiles(msg.profiles)
-		return m, nil
-	case profileSavedMsg:
-		if msg.err != nil {
-			return m, nil
-		}
-		m.connection.SetProfiles(msg.profiles)
-		return m, nil
-	case connection.DeleteProfileMsg:
-		return m, deleteProfileCmd(msg.Name)
-	case profileDeletedMsg:
-		if msg.err != nil {
-			m.connection.SetStatus(connection.StatusError, msg.err.Error())
-			return m, nil
-		}
-		m.connection.SetProfiles(msg.profiles)
-		if len(msg.profiles) == 0 {
-			m.connection.SetStatus(connection.StatusIdle, "All saved profiles removed.")
-		} else {
-			m.connection.SetStatus(connection.StatusIdle, "Profile removed.")
-		}
-		return m, nil
-	case tablesLoadedMsg:
-		m.browser.SetTables(msg.tables)
-		if selected, ok := m.browser.SelectedTable(); ok && m.activeConn != nil {
-			m.browser.SetPreviewStatus("Loading rows...")
-			return m, previewTableCmd(m.activeConn, selected)
-		}
-		return m, nil
-	case tablesLoadErrorMsg:
-		m.browser.SetStatus(msg.err.Error())
-		return m, nil
-	case browser.TableSelectedMsg:
-		if m.activeConn == nil {
-			return m, nil
-		}
-		m.browser.SetPreviewStatus("Loading rows...")
-		return m, previewTableCmd(m.activeConn, msg.Table)
-	case browser.OpenProfilesMsg:
-		m.screen = screenConnection
-		if !m.connection.FocusProfiles() {
-			m.connection.SetStatus(connection.StatusError, "No saved profiles found.")
-		}
-		return m, nil
-	case browser.DisconnectMsg:
-		if m.activeConn != nil {
-			_ = m.activeConn.Close(m.connection.Context())
-			m.activeConn = nil
-		}
-		m.screen = screenConnection
-		m.connection.SetStatus(connection.StatusIdle, "Disconnected. Choose a profile or edit the form to connect again.")
-		return m, nil
-	case browser.ReconnectMsg:
-		if m.activeConn != nil {
-			_ = m.activeConn.Close(m.connection.Context())
-			m.activeConn = nil
-		}
-		profile := m.connection.Profile()
-		if m.current != nil {
-			profile = *m.current
-		}
-		m.screen = screenConnection
-		m.connection.SetStatus(connection.StatusConnecting, "Reconnecting to database...")
-		return m, connectCmd(profile)
-	case previewLoadedMsg:
-		m.browser.SetPreview(msg.table, msg.result)
-		return m, nil
-	case previewLoadErrorMsg:
-		m.browser.SetPreviewError(msg.table, msg.err.Error())
-		return m, nil
+	if next, cmd, handled := m.handleGlobalMessage(msg); handled {
+		return next, cmd
+	}
+	if next, cmd, handled := m.handleAppMessage(msg); handled {
+		return next, cmd
 	}
 
 	switch m.screen {
@@ -157,6 +58,136 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.connection, cmd = m.connection.Update(msg)
 		return m, cmd
+	}
+}
+
+func (m Model) handleGlobalMessage(msg tea.Msg) (Model, tea.Cmd, bool) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.connection.SetSize(msg.Width, msg.Height)
+		m.browser.SetSize(msg.Width, msg.Height)
+		return m, nil, true
+	case tea.KeyMsg:
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit, true
+		}
+	}
+	return m, nil, false
+}
+
+func (m Model) handleAppMessage(msg tea.Msg) (Model, tea.Cmd, bool) {
+	switch msg := msg.(type) {
+	case connection.SubmitMsg:
+		profile := m.connection.Profile()
+		m.connection.SetStatus(connection.StatusConnecting, "Connecting to database...")
+		return m, connectCmd(profile), true
+	case connectSuccessMsg:
+		return m.handleConnectSuccess(msg)
+	case connectErrorMsg:
+		m.connection.SetStatus(connection.StatusError, msg.err.Error())
+		return m, nil, true
+	case profilesLoadedMsg:
+		return m.handleProfilesLoaded(msg)
+	case profileSavedMsg:
+		if msg.err == nil {
+			m.connection.SetProfiles(msg.profiles)
+		}
+		return m, nil, true
+	case connection.DeleteProfileMsg:
+		return m, deleteProfileCmd(msg.Name), true
+	case profileDeletedMsg:
+		return m.handleProfileDeleted(msg)
+	case tablesLoadedMsg:
+		return m.handleTablesLoaded(msg)
+	case tablesLoadErrorMsg:
+		m.browser.SetStatus(msg.err.Error())
+		return m, nil, true
+	case browser.TableSelectedMsg:
+		if m.activeConn == nil {
+			return m, nil, true
+		}
+		m.browser.SetPreviewStatus("Loading rows...")
+		return m, previewTableCmd(m.activeConn, msg.Table), true
+	case browser.OpenProfilesMsg:
+		m.screen = screenConnection
+		if !m.connection.FocusProfiles() {
+			m.connection.SetStatus(connection.StatusError, "No saved profiles found.")
+		}
+		return m, nil, true
+	case browser.DisconnectMsg:
+		m.closeActiveConn()
+		m.screen = screenConnection
+		m.connection.SetStatus(connection.StatusIdle, "Disconnected. Choose a profile or edit the form to connect again.")
+		return m, nil, true
+	case browser.ReconnectMsg:
+		m.closeActiveConn()
+		profile := m.connection.Profile()
+		if m.current != nil {
+			profile = *m.current
+		}
+		m.screen = screenConnection
+		m.connection.SetStatus(connection.StatusConnecting, "Reconnecting to database...")
+		return m, connectCmd(profile), true
+	case previewLoadedMsg:
+		m.browser.SetPreview(msg.table, msg.result)
+		return m, nil, true
+	case previewLoadErrorMsg:
+		m.browser.SetPreviewError(msg.table, msg.err.Error())
+		return m, nil, true
+	}
+	return m, nil, false
+}
+
+func (m Model) handleConnectSuccess(msg connectSuccessMsg) (Model, tea.Cmd, bool) {
+	m.closeActiveConn()
+	m.activeConn = msg.conn
+	profile := msg.profile
+	m.current = &profile
+	m.connection.SetStatus(connection.StatusSuccess, connection.SuccessMessage(msg.profile))
+	m.browser.SetStatus("Loading tables...")
+	m.screen = screenBrowser
+	return m, tea.Batch(
+		listTablesCmd(msg.conn),
+		saveProfileCmd(msg.profile),
+	), true
+}
+
+func (m Model) handleProfilesLoaded(msg profilesLoadedMsg) (Model, tea.Cmd, bool) {
+	if msg.err != nil {
+		m.connection.SetStatus(connection.StatusError, msg.err.Error())
+		return m, nil, true
+	}
+	m.connection.SetProfiles(msg.profiles)
+	return m, nil, true
+}
+
+func (m Model) handleProfileDeleted(msg profileDeletedMsg) (Model, tea.Cmd, bool) {
+	if msg.err != nil {
+		m.connection.SetStatus(connection.StatusError, msg.err.Error())
+		return m, nil, true
+	}
+	m.connection.SetProfiles(msg.profiles)
+	if len(msg.profiles) == 0 {
+		m.connection.SetStatus(connection.StatusIdle, "All saved profiles removed.")
+	} else {
+		m.connection.SetStatus(connection.StatusIdle, "Profile removed.")
+	}
+	return m, nil, true
+}
+
+func (m Model) handleTablesLoaded(msg tablesLoadedMsg) (Model, tea.Cmd, bool) {
+	m.browser.SetTables(msg.tables)
+	if selected, ok := m.browser.SelectedTable(); ok && m.activeConn != nil {
+		m.browser.SetPreviewStatus("Loading rows...")
+		return m, previewTableCmd(m.activeConn, selected), true
+	}
+	return m, nil, true
+}
+
+func (m *Model) closeActiveConn() {
+	if m.activeConn != nil {
+		_ = m.activeConn.Close(m.connection.Context())
+		m.activeConn = nil
 	}
 }
 
