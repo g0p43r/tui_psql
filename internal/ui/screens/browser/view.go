@@ -20,8 +20,8 @@ func (m Model) View() string {
 	}
 	rightWidth := maxInt(48, usableWidth-leftWidth-2)
 
-	leftContent := lipgloss.NewStyle().Height(paneContentHeight).Render(m.leftPane())
-	rightContent := lipgloss.NewStyle().Height(paneContentHeight).Render(m.rightPane(rightWidth))
+	leftContent := m.leftPane(paneContentHeight)
+	rightContent := m.rightPane(rightWidth, paneContentHeight)
 
 	leftStyle := styles.Panel.Width(leftWidth)
 	rightStyle := styles.Panel.Width(rightWidth)
@@ -37,6 +37,10 @@ func (m Model) View() string {
 	layout := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	content := styles.App.Render(layout)
 
+	if m.editorActive {
+		content = styles.App.Render(m.sqlEditorView(usableWidth, usableHeight))
+	}
+
 	if m.expanded {
 		content = styles.App.Render(m.expandedRecordView(usableWidth, usableHeight))
 	}
@@ -48,7 +52,7 @@ func (m Model) View() string {
 	return content
 }
 
-func (m Model) leftPane() string {
+func (m Model) leftPane(height int) string {
 	var lines []string
 	lines = append(lines, styles.Title.Render("Tables"))
 	lines = append(lines, styles.Subtitle.Render(m.status))
@@ -73,10 +77,10 @@ func (m Model) leftPane() string {
 
 	lines = append(lines, "")
 	lines = append(lines, styles.Help.Render("Tab: switch pane  Up/Down: move"))
-	return strings.Join(lines, "\n")
+	return fitPaneContent(lines, height)
 }
 
-func (m Model) rightPane(width int) string {
+func (m Model) rightPane(width, height int) string {
 	var lines []string
 	lines = append(lines, styles.Title.Render("Table Preview"))
 	lines = append(lines, styles.Subtitle.Render(m.previewStatus))
@@ -101,8 +105,25 @@ func (m Model) rightPane(width int) string {
 		return strings.Join(lines, "\n")
 	}
 
-	lines = append(lines, renderTable(m.preview, width-6, m.selectedRow)...)
+	tableHeight := maxInt(4, height-8)
+	lines = append(lines, renderTable(m.preview, width-6, tableHeight, m.selectedRow, m.rowOffset, m.colOffset)...)
 	lines = append(lines, "")
-	lines = append(lines, styles.Help.Render("Tab: switch pane  Up/Down: row  Enter: open record"))
+	lines = append(lines, styles.Help.Render("Tab: switch pane  Up/Down: row  Left/Right: cols  PgUp/PgDn: page  Enter: open record  F2/F3/F4: SQL editor  Ctrl+P: profiles  Ctrl+X: disconnect  Ctrl+R: reconnect"))
+	return fitPaneContent(lines, height)
+}
+
+func fitPaneContent(lines []string, height int) string {
+	if height <= 0 {
+		return ""
+	}
+
+	if len(lines) > height {
+		lines = lines[:height]
+	} else {
+		for len(lines) < height {
+			lines = append(lines, "")
+		}
+	}
+
 	return strings.Join(lines, "\n")
 }

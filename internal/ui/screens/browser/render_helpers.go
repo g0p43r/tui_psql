@@ -11,6 +11,10 @@ type columnLayout struct {
 	indexes       []int
 	widths        []int
 	hiddenColumns int
+	firstColumn   int
+	lastColumn    int
+	scrollOffset  int
+	maxOffset     int
 }
 
 func fitCell(value string, width int) string {

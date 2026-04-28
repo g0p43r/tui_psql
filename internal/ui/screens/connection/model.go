@@ -26,7 +26,17 @@ type Model struct {
 	height     int
 	status     string
 	statusKind StatusKind
+	profiles   []domain.ConnectionProfile
+	profileIdx int
+	zone       FocusZone
 }
+
+type FocusZone string
+
+const (
+	ZoneForm     FocusZone = "form"
+	ZoneProfiles FocusZone = "profiles"
+)
 
 type StatusKind string
 
@@ -38,6 +48,9 @@ const (
 )
 
 type SubmitMsg struct{}
+type DeleteProfileMsg struct {
+	Name string
+}
 
 func New() Model {
 	fields := []field{
@@ -56,6 +69,7 @@ func New() Model {
 		fields:     fields,
 		status:     "Fill in the connection details and press Enter on Password.",
 		statusKind: StatusIdle,
+		zone:       ZoneForm,
 	}
 }
 
@@ -85,6 +99,7 @@ func newField(label, value string) field {
 func (m Model) Profile() domain.ConnectionProfile {
 	values := m.Values()
 	return domain.ConnectionProfile{
+		Name:     profileName(values["user"], values["host"], values["port"], values["database"]),
 		Host:     values["host"],
 		Port:     values["port"],
 		Database: values["database"],
@@ -128,6 +143,96 @@ func (m Model) Validate() error {
 func (m *Model) SetStatus(kind StatusKind, status string) {
 	m.statusKind = kind
 	m.status = status
+}
+
+func (m *Model) SetProfiles(profiles []domain.ConnectionProfile) {
+	m.profiles = profiles
+	if len(profiles) == 0 {
+		m.profileIdx = 0
+		m.zone = ZoneForm
+		return
+	}
+	if m.profileIdx >= len(profiles) {
+		m.profileIdx = len(profiles) - 1
+	}
+	if len(profiles) > 0 {
+		m.ApplyProfile(profiles[m.profileIdx])
+		if m.statusKind != StatusSuccess {
+			m.status = fmt.Sprintf("Loaded %d saved profile(s).", len(profiles))
+			m.statusKind = StatusIdle
+		}
+	}
+}
+
+func (m *Model) ApplyProfile(profile domain.ConnectionProfile) {
+	values := map[string]string{
+		"host":     profile.Host,
+		"port":     profile.Port,
+		"database": profile.Database,
+		"user":     profile.User,
+		"password": profile.Password,
+	}
+
+	for i := range m.fields {
+		key := strings.ToLower(m.fields[i].label)
+		m.fields[i].input.SetValue(values[key])
+	}
+}
+
+func (m *Model) SelectNextProfile() bool {
+	if len(m.profiles) == 0 {
+		return false
+	}
+
+	m.profileIdx++
+	if m.profileIdx >= len(m.profiles) {
+		m.profileIdx = 0
+	}
+
+	m.ApplyProfile(m.profiles[m.profileIdx])
+	m.statusKind = StatusIdle
+	m.status = fmt.Sprintf("Profile: %s", m.profiles[m.profileIdx].Name)
+	return true
+}
+
+func (m *Model) SelectPrevProfile() bool {
+	if len(m.profiles) == 0 {
+		return false
+	}
+
+	m.profileIdx--
+	if m.profileIdx < 0 {
+		m.profileIdx = len(m.profiles) - 1
+	}
+
+	m.ApplyProfile(m.profiles[m.profileIdx])
+	m.statusKind = StatusIdle
+	m.status = fmt.Sprintf("Profile: %s", m.profiles[m.profileIdx].Name)
+	return true
+}
+
+func (m Model) SelectedProfileName() string {
+	if len(m.profiles) == 0 || m.profileIdx < 0 || m.profileIdx >= len(m.profiles) {
+		return ""
+	}
+	return m.profiles[m.profileIdx].Name
+}
+
+func (m Model) CanFocusProfiles() bool {
+	return len(m.profiles) > 0
+}
+
+func (m *Model) FocusProfiles() bool {
+	if !m.CanFocusProfiles() {
+		return false
+	}
+	m.zone = ZoneProfiles
+	m.SetStatus(StatusIdle, fmt.Sprintf("Profiles list focused. Current: %s", m.profiles[m.profileIdx].Name))
+	return true
+}
+
+func profileName(user, host, port, database string) string {
+	return fmt.Sprintf("%s@%s:%s/%s", user, host, port, database)
 }
 
 func (m Model) Context() context.Context {

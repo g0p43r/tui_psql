@@ -31,3 +31,18 @@ type previewLoadErrorMsg struct {
 	table domain.DBObject
 	err   error
 }
+
+type profilesLoadedMsg struct {
+	profiles []domain.ConnectionProfile
+	err      error
+}
+
+type profileSavedMsg struct {
+	profiles []domain.ConnectionProfile
+	err      error
+}
+
+type profileDeletedMsg struct {
+	profiles []domain.ConnectionProfile
+	err      error
+}

@@ -27,7 +27,27 @@ func (m Model) View() string {
 	lines = append(lines, "")
 	lines = append(lines, m.renderStatus())
 	lines = append(lines, "")
-	lines = append(lines, styles.Help.Render("Tab/Shift+Tab: move  Enter: next  Ctrl+C: quit"))
+	if len(m.profiles) > 0 {
+		lines = append(lines, styles.Subtitle.Render("Saved profiles"))
+		for i, profile := range m.profiles {
+			prefix := "  "
+			if i == m.profileIdx {
+				prefix = "> "
+			}
+
+			line := prefix + profile.Name
+			if i == m.profileIdx {
+				color := lipgloss.Color("212")
+				if m.zone == ZoneProfiles {
+					color = lipgloss.Color("42")
+				}
+				line = lipgloss.NewStyle().Foreground(color).Bold(true).Render(line)
+			}
+			lines = append(lines, line)
+		}
+		lines = append(lines, "")
+	}
+	lines = append(lines, styles.Help.Render("Tab/Shift+Tab: form  Enter: connect/apply  Ctrl+P: profiles  Ctrl+F: form  Ctrl+D: delete profile  Ctrl+C: quit"))
 
 	panel := styles.Panel.Width(formWidth).Render(strings.Join(lines, "\n"))
 	content := styles.App.Render(panel)

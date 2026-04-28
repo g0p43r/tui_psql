@@ -2,16 +2,29 @@
 
 TUI-клиент для PostgreSQL на Go.
 
-Сейчас проект находится на стадии MVP: можно подключиться к базе, увидеть список таблиц и preview данных, а также открыть выбранную запись в отдельном окне.
+Сейчас это рабочий MVP: можно подключиться к базе, сохранить профиль подключения, переключаться между профилями, просматривать таблицы, смотреть результат в viewer и открывать SQL-шаблоны для `INSERT`, `UPDATE`, `DELETE`.
 
 ## Возможности
 
 - форма подключения к PostgreSQL
-- асинхронная проверка подключения через `pgx`
-- список таблиц и views после успешного connect
-- preview строк выбранной таблицы
+- асинхронное подключение через `pgx`
+- сохранение connection profiles в локальный `profiles.json`
+- пароль в профили не сохраняется
+- список таблиц и views после успешного подключения
+- result viewer:
+  - вертикальная навигация по строкам
+  - горизонтальная навигация по колонкам
+  - sticky first column
+  - row/column viewport status
 - развёрнутый просмотр выбранной записи
-- форматирование PostgreSQL-типов для TUI:
+- SQL editor overlay с шаблонами:
+  - `INSERT`
+  - `UPDATE`
+  - `DELETE`
+- lifecycle подключения:
+  - disconnect
+  - reconnect
+- форматирование PostgreSQL-типов для UI:
   - `uuid`
   - `json/jsonb`
   - `bytea`
@@ -35,31 +48,43 @@ TUI-клиент для PostgreSQL на Go.
 - Go `1.26.2`
 - локально доступная PostgreSQL база
 
-Запуск через `Taskfile`:
+Запуск:
 
 ```bash
 task start
 ```
 
-Проверка сборки:
+Сборка:
 
 ```bash
 task build
 ```
 
-Прямой запуск без `task`:
+Прямой запуск:
 
 ```bash
 env GOCACHE=/tmp/tui_psql-gocache go run ./cmd/tui_psql
 ```
 
+## Профили
+
+Профили сохраняются через `os.UserConfigDir()`.
+
+На macOS путь обычно такой:
+
+```text
+~/Library/Application Support/tui_psql/profiles.json
+```
+
+Важно:
+
+- пароль не сохраняется
+- активная сессия не сохраняется
+- текущее подключение живёт только в памяти процесса
+
 ## Текущий UX
 
 ### Экран подключения
-
-- `Tab` / `Shift+Tab` переключают поля
-- `Enter` на поле `Password` запускает подключение
-- `Ctrl+C` завершает приложение
 
 Поля по умолчанию:
 
@@ -69,53 +94,85 @@ env GOCACHE=/tmp/tui_psql-gocache go run ./cmd/tui_psql
 - `User`: `postgres`
 - `SSLMode`: сейчас жёстко `disable`
 
+Управление:
+
+- `Tab` / `Shift+Tab` — навигация по форме
+- `Enter` на поле `Password` — подключиться
+- `Ctrl+P` — фокус на список профилей
+- `Ctrl+F` — вернуть фокус на форму
+- `Up/Down` или `j/k` — навигация по профилям
+- `Enter` на списке профилей — применить профиль
+- `Ctrl+D` — удалить выбранный профиль
+- `Ctrl+C` — выход
+
 ### Экран browser
 
-- слева: список таблиц
-- справа: preview выбранной таблицы
+Layout:
+
+- слева — список таблиц
+- справа — result viewer выбранной таблицы
 
 Управление:
 
-- `Tab` переключает фокус между списком таблиц и preview
-- `Up/Down` или `j/k` двигают выделение
-- `Enter` на правой панели открывает выбранную запись
-- `Esc` или `Enter` закрывают окно записи
-- `Ctrl+C` завершает приложение
+- `Tab` — переключение фокуса между таблицами и viewer
+- `Up/Down` или `j/k` — навигация по строкам / таблицам
+- `Left/Right` или `h/l` — горизонтальная навигация по колонкам
+- `PgUp/PgDn` — page navigation по строкам
+- `Home/End` — перейти в начало/конец результата
+- `Enter` — открыть выбранную запись
+- `Esc` или `Enter` в record view — закрыть record view
+- `F2` — открыть SQL template для `INSERT`
+- `F3` — открыть SQL template для `UPDATE`
+- `F4` — открыть SQL template для `DELETE`
+- `Ctrl+P` — вернуться к выбору профилей
+- `Ctrl+X` — disconnect
+- `Ctrl+R` — reconnect
+- `Ctrl+C` — выход
+
+### SQL Editor
+
+Пока это только editor с шаблонами, без выполнения SQL.
+
+Сейчас:
+
+- открывается как modal overlay
+- заполняется шаблоном по выбранной таблице
+- для `UPDATE` / `DELETE` использует текущую выбранную строку как подсказку в комментариях
+- `Esc` закрывает editor
 
 ## Структура проекта
 
 ```text
-cmd/tui_psql/                # entrypoint
-internal/app/                # root Bubble Tea model и orchestration
-internal/domain/             # доменные типы
-internal/pg/                 # подключение, introspection, preview queries
-internal/pg/formatter/       # приведение PostgreSQL значений к строкам для UI
+cmd/tui_psql/                  # entrypoint
+internal/app/                  # root Bubble Tea model и orchestration
+internal/config/               # profiles storage
+internal/domain/               # доменные типы
+internal/pg/                   # connect, preview, introspection
+internal/pg/formatter/         # приведение PostgreSQL значений к строкам для UI
 internal/ui/screens/connection/
 internal/ui/screens/browser/
-internal/ui/styles/          # общие lipgloss стили
+internal/ui/styles/            # общие lipgloss стили
 ```
 
 ## Что уже реализовано архитектурно
 
 - UI не ходит в PostgreSQL напрямую
 - подключение и запросы запускаются через `tea.Cmd`
-- форматирование значений вынесено в отдельный helper package
+- formatter PostgreSQL-типов вынесен отдельно
 - экраны разделены на `model/update/view`
+- browser разбит на отдельные render-файлы
 
 ## Ограничения текущего MVP
 
-- нет SQL editor
+- SQL editor пока не выполняет запросы
+- viewer сейчас работает на preview `SELECT * ... LIMIT 50`
 - нет history запросов
-- нет скролла по большим result sets
-- preview использует `SELECT * ... LIMIT 50`
+- нет сохранения активной session state
 - `sslmode` пока не настраивается из UI
-- нет сохранения connection profiles
 
 ## Следующие шаги
 
-- SQL editor
-- полноценный result viewer
-- scroll по строкам и колонкам
-- disconnect / reconnect
-- сохранение профилей подключений
+- выполнение SQL из editor
+- отдельный result mode для `INSERT/UPDATE/DELETE`
+- `rows affected` и SQL errors в editor flow
 - query history
