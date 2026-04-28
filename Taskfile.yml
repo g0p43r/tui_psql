@@ -1,0 +1,12 @@
+version: "3"
+
+tasks:
+  start:
+    desc: Start the TUI application
+    cmds:
+      - env GOCACHE=/tmp/tui_psql-gocache go run ./cmd/tui_psql
+
+  build:
+    desc: Build the TUI application
+    cmds:
+      - env GOCACHE=/tmp/tui_psql-gocache go build ./...
