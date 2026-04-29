@@ -14,6 +14,8 @@ import (
 func (m Model) sqlEditorView(width, height int) string {
 	title := "SQL Editor"
 	switch m.editorMode {
+	case editorQuery:
+		title = "SQL Editor: QUERY"
 	case editorInsert:
 		title = "SQL Editor: INSERT"
 	case editorUpdate:
@@ -28,12 +30,30 @@ func (m Model) sqlEditorView(width, height int) string {
 		title = "SQL Editor: DROP TABLE"
 	}
 
+	editorBlockHeight := maxInt(8, (height-8)/2)
+	outputBlockHeight := maxInt(6, (height-8)-editorBlockHeight)
+	editorPane := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		Height(editorBlockHeight).
+		Render(m.editor.View())
+
+	outputPane := m.editorOutputView(width-18, outputBlockHeight-2)
+	outputPane = lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		Height(outputBlockHeight).
+		Render(outputPane)
+
 	lines := []string{
 		styles.Title.Render(title),
 		styles.Subtitle.Render(fmt.Sprintf("Type: %s", strings.ToUpper(string(m.EditorType())))),
-		styles.Subtitle.Render("F5/Ctrl+Enter: execute  Ctrl+T: change type  Esc: close"),
+		styles.Subtitle.Render("Alt+Enter: execute  Ctrl+T: change type  Esc: close"),
 		"",
-		m.editor.View(),
+		styles.Subtitle.Render("Query"),
+		editorPane,
+		styles.Subtitle.Render("Output"),
+		outputPane,
 	}
 
 	if m.editorStatus != "" {
@@ -55,6 +75,26 @@ func (m Model) sqlEditorView(width, height int) string {
 		Render(strings.Join(lines, "\n"))
 }
 
+func (m Model) editorOutputView(width, height int) string {
+	if m.editorErr != "" {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Render(m.editorErr)
+	}
+	if len(m.editorResult.Columns) == 0 && m.editorStatus == "" {
+		return styles.Subtitle.Render("No output yet.")
+	}
+	if len(m.editorResult.Columns) > 0 {
+		lines := renderTable(m.editorResult, maxInt(20, width), maxInt(4, height), m.resultRow, m.resultRowOffset, m.resultColOffset)
+		return strings.Join(lines, "\n")
+	}
+	if m.editorStatus != "" {
+		if m.editorStatusErr {
+			return lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Render(m.editorStatus)
+		}
+		return styles.Subtitle.Render(m.editorStatus)
+	}
+	return styles.Subtitle.Render("No output.")
+}
+
 func buildSQLTemplate(mode editorMode, table domain.DBObject, columns []string, columnTypes []string, row []string) string {
 	switch mode {
 	case editorInsert:
@@ -71,29 +111,26 @@ func buildSQLTemplate(mode editorMode, table domain.DBObject, columns []string, 
 func buildCreateTableTemplate(schema string) string {
 	return fmt.Sprintf(
 		"CREATE TABLE %s.new_table (\n    id uuid PRIMARY KEY,\n    name text NOT NULL,\n    created_at timestamptz NOT NULL DEFAULT now()\n);\n\n-- Example column type notes:\n-- uuid, text, varchar, integer, bigint, numeric, boolean, jsonb, timestamptz",
-		schema,
+		quoteIdent(schema),
 	)
 }
 
 func buildAlterTableTemplate(table domain.DBObject) string {
+	target := quoteQualified(table)
 	return fmt.Sprintf(
-		"ALTER TABLE %s.%s\n    ADD COLUMN new_column text;\n\n-- Examples:\n-- ALTER TABLE %s.%s RENAME COLUMN old_name TO new_name;\n-- ALTER TABLE %s.%s DROP COLUMN obsolete_column;",
-		table.Schema,
-		table.Name,
-		table.Schema,
-		table.Name,
-		table.Schema,
-		table.Name,
+		"ALTER TABLE %s\n    ADD COLUMN new_column text;\n\n-- Examples:\n-- ALTER TABLE %s RENAME COLUMN old_name TO new_name;\n-- ALTER TABLE %s DROP COLUMN obsolete_column;",
+		target,
+		target,
+		target,
 	)
 }
 
 func buildDropTableTemplate(table domain.DBObject) string {
+	target := quoteQualified(table)
 	return fmt.Sprintf(
-		"DROP TABLE IF EXISTS %s.%s;\n\n-- If the table has dependent objects, use:\n-- DROP TABLE IF EXISTS %s.%s CASCADE;",
-		table.Schema,
-		table.Name,
-		table.Schema,
-		table.Name,
+		"DROP TABLE IF EXISTS %s;\n\n-- If the table has dependent objects, use:\n-- DROP TABLE IF EXISTS %s CASCADE;",
+		target,
+		target,
 	)
 }
 
@@ -106,14 +143,13 @@ func buildInsertTemplate(table domain.DBObject, columns []string, columnTypes []
 	valueLines := make([]string, 0, len(columns))
 	for i, col := range columns {
 		colType := columnTypeAt(columnTypes, i)
-		columnLines = append(columnLines, "    "+col)
+		columnLines = append(columnLines, "    "+quoteIdent(col))
 		valueLines = append(valueLines, fmt.Sprintf("    /* %s %s */ NULL", col, colType))
 	}
 
 	return fmt.Sprintf(
-		"INSERT INTO %s.%s (\n%s\n)\nVALUES (\n%s\n);",
-		table.Schema,
-		table.Name,
+		"INSERT INTO %s (\n%s\n)\nVALUES (\n%s\n);",
+		quoteQualified(table),
 		strings.Join(columnLines, ",\n"),
 		strings.Join(valueLines, ",\n"),
 	)
@@ -128,7 +164,7 @@ func buildUpdateTemplate(table domain.DBObject, columns []string, columnTypes []
 	for i, col := range columns {
 		colType := columnTypeAt(columnTypes, i)
 		current := currentValuePreview(row, i)
-		setLines = append(setLines, fmt.Sprintf("    %s = /* %s current: %s */ %s", col, colType, current, sqlValue(row, i)))
+		setLines = append(setLines, fmt.Sprintf("    %s = /* %s current: %s */ %s", quoteIdent(col), colType, current, sqlValue(row, i)))
 	}
 
 	whereColumn := columns[0]
@@ -136,11 +172,10 @@ func buildUpdateTemplate(table domain.DBObject, columns []string, columnTypes []
 	whereValue := currentValuePreview(row, 0)
 
 	return fmt.Sprintf(
-		"UPDATE %s.%s\nSET\n%s\nWHERE\n    %s = /* %s current: %s */ %s;",
-		table.Schema,
-		table.Name,
+		"UPDATE %s\nSET\n%s\nWHERE\n    %s = /* %s current: %s */ %s;",
+		quoteQualified(table),
 		strings.Join(setLines, ",\n"),
-		whereColumn,
+		quoteIdent(whereColumn),
 		whereType,
 		whereValue,
 		sqlValue(row, 0),
@@ -156,21 +191,33 @@ func buildDeleteTemplate(table domain.DBObject, columns []string, columnTypes []
 	whereValue := currentValuePreview(row, 0)
 
 	return fmt.Sprintf(
-		"DELETE FROM %s.%s\nWHERE\n    %s = /* %s current: %s */ %s;",
-		table.Schema,
-		table.Name,
-		whereColumn,
+		"DELETE FROM %s\nWHERE\n    %s = /* %s current: %s */ %s;",
+		quoteQualified(table),
+		quoteIdent(whereColumn),
 		whereType,
 		whereValue,
 		sqlValue(row, 0),
 	)
 }
 
+func quoteQualified(table domain.DBObject) string {
+	if table.Schema == "" {
+		return quoteIdent(table.Name)
+	}
+	return quoteIdent(table.Schema) + "." + quoteIdent(table.Name)
+}
+
+func quoteIdent(value string) string {
+	value = strings.TrimSpace(value)
+	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
+}
+
 func currentValuePreview(row []string, index int) string {
 	if index >= 0 && index < len(row) {
 		value := row[index]
-		if len(value) > 40 {
-			return value[:40] + "..."
+		runes := []rune(value)
+		if len(runes) > 40 {
+			return string(runes[:40]) + "..."
 		}
 		return value
 	}

@@ -1,6 +1,8 @@
 package app
 
 import (
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/g0p43r/tui_psql/internal/config"
@@ -9,7 +11,7 @@ import (
 	"github.com/g0p43r/tui_psql/internal/pg"
 	"github.com/g0p43r/tui_psql/internal/ui/screens/browser"
 	"github.com/g0p43r/tui_psql/internal/ui/screens/connection"
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type screen string
@@ -20,11 +22,27 @@ const (
 )
 
 type Model struct {
-	connection connection.Model
-	browser    browser.Model
-	activeConn *pgx.Conn
-	current    *domain.ConnectionProfile
-	screen     screen
+	connection      connection.Model
+	browser         browser.Model
+	session         *dbSession
+	current         *domain.ConnectionProfile
+	screen          screen
+	nextSessionID   int
+	nextRequestID   int
+	latestTablesID  int
+	latestPreviewID int
+}
+
+type dbSession struct {
+	id   int
+	pool *pgxpool.Pool
+}
+
+func (s *dbSession) Close() {
+	if s == nil || s.pool == nil {
+		return
+	}
+	s.pool.Close()
 }
 
 func NewModel() Model {
@@ -69,7 +87,7 @@ func (m Model) handleGlobalMessage(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.browser.SetSize(msg.Width, msg.Height)
 		return m, nil, true
 	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" {
+		if msg.String() == "ctrl+q" {
 			return m, tea.Quit, true
 		}
 	}
@@ -99,16 +117,24 @@ func (m Model) handleAppMessage(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case profileDeletedMsg:
 		return m.handleProfileDeleted(msg)
 	case tablesLoadedMsg:
+		if msg.requestID != m.latestTablesID {
+			return m, nil, true
+		}
 		return m.handleTablesLoaded(msg)
 	case tablesLoadErrorMsg:
+		if msg.requestID != m.latestTablesID {
+			return m, nil, true
+		}
 		m.browser.SetStatus(errs.Message(msg.err))
 		return m, nil, true
 	case browser.TableSelectedMsg:
-		if m.activeConn == nil {
+		if m.session == nil {
 			return m, nil, true
 		}
 		m.browser.SetPreviewStatus("Loading rows...")
-		return m, previewTableCmd(m.activeConn, msg.Table), true
+		requestID := m.nextID()
+		m.latestPreviewID = requestID
+		return m, previewTableCmd(m.session, requestID, msg.Table), true
 	case browser.OpenProfilesMsg:
 		m.screen = screenConnection
 		if !m.connection.FocusProfiles() {
@@ -130,24 +156,41 @@ func (m Model) handleAppMessage(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.connection.SetStatus(connection.StatusConnecting, "Reconnecting to database...")
 		return m, connectCmd(profile), true
 	case browser.ExecuteSQLMsg:
-		if m.activeConn == nil {
+		if m.session == nil {
 			m.browser.SetEditorStatus("No active connection.", true)
 			return m, nil, true
 		}
-		if msg.NewTableName != "" {
+		if msg.EditorMode == "create" && msg.NewTableName != "" {
 			m.browser.SetPendingSelection(msg.NewTableSchema, msg.NewTableName)
 		}
 		m.browser.SetEditorStatus("Executing query...", false)
-		return m, executeSQLCmd(m.activeConn, msg.SQL, msg.QueryType, string(msg.EditorMode), msg.NewTableSchema, msg.NewTableName), true
+		return m, executeSQLCmd(m.session, msg.SQL, msg.QueryType, string(msg.EditorMode), msg.QueryWorkbench, msg.NewTableSchema, msg.NewTableName, msg.TargetSchema, msg.TargetTable), true
 	case previewLoadedMsg:
+		if msg.requestID != m.latestPreviewID {
+			return m, nil, true
+		}
 		m.browser.SetPreview(msg.table, msg.result)
 		return m, nil, true
 	case previewLoadErrorMsg:
+		if msg.requestID != m.latestPreviewID {
+			return m, nil, true
+		}
 		m.browser.SetPreviewError(msg.table, errs.Message(msg.err))
 		return m, nil, true
 	case sqlExecutedMsg:
+		if m.session == nil || msg.sessionID != m.session.id {
+			return m, nil, true
+		}
 		return m.handleSQLExecuted(msg)
 	case sqlExecuteErrorMsg:
+		if m.session == nil || msg.sessionID != m.session.id {
+			return m, nil, true
+		}
+		if msg.editorMode == "create" {
+			m.browser.ClearPendingSelection()
+		}
+		m.browser.AddHistory(msg.sql, msg.queryType, false, errs.Message(msg.err))
+		m.browser.SetEditorError(errs.Message(msg.err))
 		m.browser.SetEditorStatus(errs.Message(msg.err), true)
 		return m, nil, true
 	}
@@ -156,14 +199,17 @@ func (m Model) handleAppMessage(msg tea.Msg) (Model, tea.Cmd, bool) {
 
 func (m Model) handleConnectSuccess(msg connectSuccessMsg) (Model, tea.Cmd, bool) {
 	m.closeActiveConn()
-	m.activeConn = msg.conn
+	m.nextSessionID++
+	m.session = &dbSession{id: m.nextSessionID, pool: msg.pool}
 	profile := msg.profile
 	m.current = &profile
 	m.connection.SetStatus(connection.StatusSuccess, connection.SuccessMessage(msg.profile))
 	m.browser.SetStatus("Loading tables...")
 	m.screen = screenBrowser
+	requestID := m.nextID()
+	m.latestTablesID = requestID
 	return m, tea.Batch(
-		listTablesCmd(msg.conn),
+		listTablesCmd(m.session, requestID),
 		saveProfileCmd(msg.profile),
 	), true
 }
@@ -193,54 +239,97 @@ func (m Model) handleProfileDeleted(msg profileDeletedMsg) (Model, tea.Cmd, bool
 
 func (m Model) handleTablesLoaded(msg tablesLoadedMsg) (Model, tea.Cmd, bool) {
 	m.browser.SetTables(msg.tables)
-	if selected, ok := m.browser.SelectedTable(); ok && m.activeConn != nil {
+	if selected, ok := m.browser.SelectedTable(); ok && m.session != nil {
 		m.browser.SetPreviewStatus("Loading rows...")
-		return m, previewTableCmd(m.activeConn, selected), true
+		requestID := m.nextID()
+		m.latestPreviewID = requestID
+		return m, previewTableCmd(m.session, requestID, selected), true
 	}
 	return m, nil, true
 }
 
 func (m Model) handleSQLExecuted(msg sqlExecutedMsg) (Model, tea.Cmd, bool) {
+	m.browser.AddHistory(msg.sql, msg.queryType, true, msg.result.CommandTag)
+	if msg.queryWorkbench {
+		return m.handleWorkbenchSQLExecuted(msg)
+	}
+	return m.handleEditorSQLExecuted(msg)
+}
+
+func (m Model) handleWorkbenchSQLExecuted(msg sqlExecutedMsg) (Model, tea.Cmd, bool) {
 	if len(msg.result.Columns) > 0 {
-		table := domain.DBObject{Schema: "query", Name: "result", Type: domain.ObjectView}
-		m.browser.SetPreview(table, msg.result)
-		m.browser.SetEditorStatus(
-			"Query OK: "+msg.result.CommandTag,
-			false,
-		)
+		m.browser.SetEditorResult(msg.result)
+		m.browser.SetEditorStatus("Query OK: "+msg.result.CommandTag, false)
 		return m, nil, true
 	}
 
-	m.browser.SetEditorStatus(
-		"Statement OK: "+msg.result.CommandTag,
-		false,
-	)
+	m.browser.SetEditorStatus("Statement OK: "+msg.result.CommandTag, false)
+	m.browser.SetEditorResult(msg.result)
 	if msg.editorMode == "create" || msg.editorMode == "alter" || msg.editorMode == "drop" {
-		m.browser.CloseEditor()
-		if m.current != nil {
-			profile := *m.current
-			m.closeActiveConn()
-			m.browser.SetStatus("Reconnecting to refresh schema objects...")
-			return m, connectCmd(profile), true
-		}
+		return m.refreshSchemaObjects()
 	}
-	if m.activeConn != nil {
+	return m, nil, true
+}
+
+func (m Model) handleEditorSQLExecuted(msg sqlExecutedMsg) (Model, tea.Cmd, bool) {
+	if len(msg.result.Columns) > 0 {
+		m.browser.SetEditorResult(msg.result)
+		table := domain.DBObject{Schema: "query", Name: "result", Type: domain.ObjectView}
+		m.browser.SetPreview(table, msg.result)
+		m.browser.SetEditorStatus("Query OK: "+msg.result.CommandTag, false)
+		return m, nil, true
+	}
+
+	m.browser.SetEditorStatus("Statement OK: "+msg.result.CommandTag, false)
+	m.browser.SetEditorResult(msg.result)
+	if msg.editorMode == "create" || msg.editorMode == "alter" || msg.editorMode == "drop" {
+		return m.refreshSchemaObjects()
+	}
+	return m.reloadPreviewAfterMutation(msg)
+}
+
+func (m Model) refreshSchemaObjects() (Model, tea.Cmd, bool) {
+	m.browser.SetStatus("Refreshing schema objects...")
+	if m.session == nil {
+		return m, nil, true
+	}
+	requestID := m.nextID()
+	m.latestTablesID = requestID
+	return m, listTablesCmd(m.session, requestID), true
+}
+
+func (m Model) reloadPreviewAfterMutation(msg sqlExecutedMsg) (Model, tea.Cmd, bool) {
+	if m.session != nil {
+		if msg.targetTable != "" {
+			target := domain.DBObject{
+				Schema: msg.targetSchema,
+				Name:   msg.targetTable,
+				Type:   domain.ObjectTable,
+			}
+			if target.Schema == "" {
+				if selected, ok := m.browser.SelectedTable(); ok {
+					target.Schema = selected.Schema
+				}
+			}
+			m.browser.SetPreviewStatus("Reloading table preview...")
+			requestID := m.nextID()
+			m.latestPreviewID = requestID
+			return m, previewTableCmd(m.session, requestID, target), true
+		}
 		if selected, ok := m.browser.SelectedTable(); ok {
 			m.browser.SetPreviewStatus("Reloading table preview...")
-			return m, tea.Batch(
-				listTablesCmd(m.activeConn),
-				previewTableCmd(m.activeConn, selected),
-			), true
+			requestID := m.nextID()
+			m.latestPreviewID = requestID
+			return m, previewTableCmd(m.session, requestID, selected), true
 		}
-		return m, listTablesCmd(m.activeConn), true
 	}
 	return m, nil, true
 }
 
 func (m *Model) closeActiveConn() {
-	if m.activeConn != nil {
-		_ = m.activeConn.Close(m.connection.Context())
-		m.activeConn = nil
+	if m.session != nil {
+		m.session.Close()
+		m.session = nil
 	}
 }
 
@@ -253,6 +342,11 @@ func (m Model) View() string {
 	}
 }
 
+func (m *Model) nextID() int {
+	m.nextRequestID++
+	return m.nextRequestID
+}
+
 func connectCmd(profile domain.ConnectionProfile) tea.Cmd {
 	return func() tea.Msg {
 		conn, err := pg.Connect(profile)
@@ -262,55 +356,82 @@ func connectCmd(profile domain.ConnectionProfile) tea.Cmd {
 
 		return connectSuccessMsg{
 			profile: profile,
-			conn:    conn,
+			pool:    conn,
 		}
 	}
 }
 
-func listTablesCmd(conn *pgx.Conn) tea.Cmd {
+func listTablesCmd(session *dbSession, requestID int) tea.Cmd {
 	return func() tea.Msg {
-		tables, err := pg.ListTables(conn)
+		tables, err := pg.ListTables(session.pool)
 		if err != nil {
-			return tablesLoadErrorMsg{err: err}
+			return tablesLoadErrorMsg{requestID: requestID, err: err}
 		}
 
-		return tablesLoadedMsg{tables: tables}
+		return tablesLoadedMsg{requestID: requestID, tables: tables}
 	}
 }
 
-func previewTableCmd(conn *pgx.Conn, table domain.DBObject) tea.Cmd {
+func previewTableCmd(session *dbSession, requestID int, table domain.DBObject) tea.Cmd {
 	return func() tea.Msg {
-		result, err := pg.PreviewTable(conn, table, 50)
+		result, err := pg.PreviewTable(session.pool, table, 50)
 		if err != nil {
 			return previewLoadErrorMsg{
-				table: table,
-				err:   err,
+				requestID: requestID,
+				table:     table,
+				err:       err,
 			}
 		}
 
 		return previewLoadedMsg{
-			table:  table,
-			result: result,
+			requestID: requestID,
+			table:     table,
+			result:    result,
 		}
 	}
 }
 
-func executeSQLCmd(conn *pgx.Conn, sql string, queryType domain.SQLQueryType, editorMode, newTableSchema, newTableName string) tea.Cmd {
+func executeSQLCmd(session *dbSession, sql string, queryType domain.SQLQueryType, editorMode string, queryWorkbench bool, newTableSchema, newTableName, targetSchema, targetTable string) tea.Cmd {
 	return func() tea.Msg {
-		result, err := pg.ExecuteSQL(conn, sql, queryType)
+		resolvedSchema := newTableSchema
+		if editorMode == "create" && strings.TrimSpace(newTableName) != "" && strings.TrimSpace(resolvedSchema) == "" {
+			schema, err := pg.CurrentSchema(session.pool)
+			if err == nil && schema != "" {
+				resolvedSchema = schema
+			}
+		}
+		resolvedTargetSchema := targetSchema
+		if strings.TrimSpace(targetTable) != "" && strings.TrimSpace(resolvedTargetSchema) == "" {
+			schema, err := pg.CurrentSchema(session.pool)
+			if err == nil && schema != "" {
+				resolvedTargetSchema = schema
+			}
+		}
+
+		result, err := pg.ExecuteSQL(session.pool, sql, queryType)
 		if err != nil {
 			return sqlExecuteErrorMsg{
-				queryType:  queryType,
-				editorMode: editorMode,
-				err:        err,
+				sessionID:      session.id,
+				queryType:      queryType,
+				editorMode:     editorMode,
+				queryWorkbench: queryWorkbench,
+				targetSchema:   resolvedTargetSchema,
+				targetTable:    targetTable,
+				sql:            sql,
+				err:            err,
 			}
 		}
 
 		return sqlExecutedMsg{
+			sessionID:      session.id,
 			queryType:      queryType,
 			editorMode:     editorMode,
-			newTableSchema: newTableSchema,
+			queryWorkbench: queryWorkbench,
+			newTableSchema: resolvedSchema,
 			newTableName:   newTableName,
+			targetSchema:   resolvedTargetSchema,
+			targetTable:    targetTable,
+			sql:            sql,
 			result:         result,
 		}
 	}

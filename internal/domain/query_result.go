@@ -7,4 +7,6 @@ type QueryResult struct {
 	CommandTag   string
 	RowsAffected int64
 	DurationMs   int64
+	Limit        int
+	Truncated    bool
 }

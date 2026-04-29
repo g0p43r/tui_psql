@@ -47,7 +47,7 @@ func (m Model) View() string {
 		}
 		lines = append(lines, "")
 	}
-	lines = append(lines, styles.Help.Render("Tab/Shift+Tab: form  Enter: connect/apply  Ctrl+P: profiles  Ctrl+F: form  Ctrl+D: delete profile  Ctrl+C: quit"))
+	lines = append(lines, styles.Help.Render("Tab/Shift+Tab: form  Enter: connect/apply  Ctrl+P: profiles  Ctrl+F: form  Ctrl+D: delete profile  Ctrl+Q: quit"))
 
 	panel := styles.Panel.Width(formWidth).Render(strings.Join(lines, "\n"))
 	content := styles.App.Render(panel)

@@ -59,12 +59,13 @@ func New() Model {
 		newField("Port", "5432"),
 		newField("Database", "postgres"),
 		newField("User", "postgres"),
+		newField("SSLMode", "disable"),
 		newField("Password", ""),
 	}
 
 	fields[0].input.Focus()
-	fields[4].input.EchoMode = textinput.EchoPassword
-	fields[4].input.EchoCharacter = '•'
+	fields[5].input.EchoMode = textinput.EchoPassword
+	fields[5].input.EchoCharacter = '•'
 
 	return Model{
 		fields:     fields,
@@ -106,7 +107,7 @@ func (m Model) Profile() domain.ConnectionProfile {
 		Database: values["database"],
 		User:     values["user"],
 		Password: values["password"],
-		SSLMode:  "disable",
+		SSLMode:  normalizeSSLMode(values["sslmode"]),
 	}
 }
 
@@ -136,6 +137,9 @@ func (m Model) Validate() error {
 	}
 	if profile.User == "" {
 		return errs.Validation("connection.Validate.User", "User is required.")
+	}
+	if !isValidSSLMode(profile.SSLMode) {
+		return errs.Validation("connection.Validate.SSLMode", "SSLMode must be one of: disable, allow, prefer, require, verify-ca, verify-full.")
 	}
 
 	return nil
@@ -169,6 +173,7 @@ func (m *Model) ApplyProfile(profile domain.ConnectionProfile) {
 		"port":     profile.Port,
 		"database": profile.Database,
 		"user":     profile.User,
+		"sslmode":  normalizeSSLMode(profile.SSLMode),
 		"password": profile.Password,
 	}
 
@@ -257,6 +262,23 @@ func profileName(user, host, port, database string) string {
 
 func (m Model) Context() context.Context {
 	return context.Background()
+}
+
+func normalizeSSLMode(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return "disable"
+	}
+	return value
+}
+
+func isValidSSLMode(value string) bool {
+	switch normalizeSSLMode(value) {
+	case "disable", "allow", "prefer", "require", "verify-ca", "verify-full":
+		return true
+	default:
+		return false
+	}
 }
 
 func SuccessMessage(profile domain.ConnectionProfile) string {

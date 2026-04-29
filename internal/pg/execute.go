@@ -10,9 +10,12 @@ import (
 	"github.com/g0p43r/tui_psql/internal/errs"
 	"github.com/g0p43r/tui_psql/internal/pg/formatter"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func PreviewTable(conn *pgx.Conn, table domain.DBObject, limit int) (domain.QueryResult, error) {
+const QueryRowLimit = 500
+
+func PreviewTable(pool *pgxpool.Pool, table domain.DBObject, limit int) (domain.QueryResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -22,7 +25,7 @@ func PreviewTable(conn *pgx.Conn, table domain.DBObject, limit int) (domain.Quer
 		limit,
 	)
 
-	rows, err := conn.Query(ctx, query)
+	rows, err := pool.Query(ctx, query)
 	if err != nil {
 		return domain.QueryResult{}, errs.E(errs.CodeQuery, "pg.PreviewTable.Query", "Failed to load table preview.", err)
 	}
@@ -60,10 +63,11 @@ func PreviewTable(conn *pgx.Conn, table domain.DBObject, limit int) (domain.Quer
 	}
 
 	result.RowsAffected = int64(len(result.Rows))
+	result.Limit = limit
 	return result, nil
 }
 
-func ExecuteSQL(conn *pgx.Conn, query string, queryType domain.SQLQueryType) (domain.QueryResult, error) {
+func ExecuteSQL(pool *pgxpool.Pool, query string, queryType domain.SQLQueryType) (domain.QueryResult, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return domain.QueryResult{}, errs.Validation("pg.ExecuteSQL.Validate", "SQL is empty.")
@@ -73,10 +77,10 @@ func ExecuteSQL(conn *pgx.Conn, query string, queryType domain.SQLQueryType) (do
 	start := time.Now()
 
 	if resolved.IsRead() {
-		return queryRows(conn, query, start)
+		return queryRows(pool, query, QueryRowLimit, start)
 	}
 
-	return execStatement(conn, query, start)
+	return execStatement(pool, query, start)
 }
 
 func resolveQueryType(query string, requested domain.SQLQueryType) domain.SQLQueryType {
@@ -84,7 +88,7 @@ func resolveQueryType(query string, requested domain.SQLQueryType) domain.SQLQue
 		return requested
 	}
 
-	upper := strings.ToUpper(strings.TrimSpace(query))
+	upper := strings.ToUpper(stripLeadingSQLComments(query))
 	switch {
 	case strings.HasPrefix(upper, "SELECT"), strings.HasPrefix(upper, "WITH"), strings.HasPrefix(upper, "SHOW"):
 		return domain.QueryTypeSelect
@@ -93,11 +97,32 @@ func resolveQueryType(query string, requested domain.SQLQueryType) domain.SQLQue
 	}
 }
 
-func queryRows(conn *pgx.Conn, query string, start time.Time) (domain.QueryResult, error) {
+func stripLeadingSQLComments(query string) string {
+	for {
+		query = strings.TrimSpace(query)
+		if strings.HasPrefix(query, "--") {
+			if idx := strings.IndexByte(query, '\n'); idx >= 0 {
+				query = query[idx+1:]
+				continue
+			}
+			return ""
+		}
+		if strings.HasPrefix(query, "/*") {
+			if idx := strings.Index(query, "*/"); idx >= 0 {
+				query = query[idx+2:]
+				continue
+			}
+			return ""
+		}
+		return query
+	}
+}
+
+func queryRows(pool *pgxpool.Pool, query string, limit int, start time.Time) (domain.QueryResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	rows, err := conn.Query(ctx, query)
+	rows, err := pool.Query(ctx, query)
 	if err != nil {
 		return domain.QueryResult{}, errs.E(errs.CodeQuery, "pg.ExecuteSQL.Query", "SQL query failed.", err)
 	}
@@ -114,9 +139,15 @@ func queryRows(conn *pgx.Conn, query string, start time.Time) (domain.QueryResul
 	result := domain.QueryResult{
 		Columns:     columns,
 		ColumnTypes: columnTypes,
+		Limit:       limit,
 	}
 
 	for rows.Next() {
+		if limit > 0 && len(result.Rows) >= limit {
+			result.Truncated = true
+			break
+		}
+
 		values, err := rows.Values()
 		if err != nil {
 			return domain.QueryResult{}, errs.E(errs.CodeQuery, "pg.ExecuteSQL.Values", "Failed to read query row.", err)
@@ -136,15 +167,18 @@ func queryRows(conn *pgx.Conn, query string, start time.Time) (domain.QueryResul
 
 	result.CommandTag = rows.CommandTag().String()
 	result.RowsAffected = rows.CommandTag().RowsAffected()
+	if result.RowsAffected < 0 || result.Truncated {
+		result.RowsAffected = int64(len(result.Rows))
+	}
 	result.DurationMs = time.Since(start).Milliseconds()
 	return result, nil
 }
 
-func execStatement(conn *pgx.Conn, query string, start time.Time) (domain.QueryResult, error) {
+func execStatement(pool *pgxpool.Pool, query string, start time.Time) (domain.QueryResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	tag, err := conn.Exec(ctx, query)
+	tag, err := pool.Exec(ctx, query)
 	if err != nil {
 		return domain.QueryResult{}, errs.E(errs.CodeQuery, "pg.ExecuteSQL.Exec", "SQL execution failed.", err)
 	}
@@ -154,4 +188,15 @@ func execStatement(conn *pgx.Conn, query string, start time.Time) (domain.QueryR
 		RowsAffected: tag.RowsAffected(),
 		DurationMs:   time.Since(start).Milliseconds(),
 	}, nil
+}
+
+func CurrentSchema(pool *pgxpool.Pool) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var schema string
+	if err := pool.QueryRow(ctx, "select current_schema()").Scan(&schema); err != nil {
+		return "", errs.E(errs.CodeQuery, "pg.CurrentSchema.QueryRow", "Failed to resolve current schema.", err)
+	}
+	return strings.TrimSpace(schema), nil
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/g0p43r/tui_psql/internal/domain"
 	"github.com/g0p43r/tui_psql/internal/errs"
@@ -123,6 +124,7 @@ func DeleteProfile(name string) ([]domain.ConnectionProfile, error) {
 
 func NormalizeProfile(profile domain.ConnectionProfile) domain.ConnectionProfile {
 	profile.Password = ""
+	profile.SSLMode = strings.ToLower(strings.TrimSpace(profile.SSLMode))
 	if profile.SSLMode == "" {
 		profile.SSLMode = "disable"
 	}

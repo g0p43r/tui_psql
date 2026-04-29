@@ -52,6 +52,9 @@ func renderTable(result domain.QueryResult, width, height, selectedRow, rowOffse
 		fmt.Sprintf("cols %d-%d/%d", layout.firstColumn+1, layout.lastColumn+1, len(result.Columns)),
 		fmt.Sprintf("offset %d/%d %s", layout.scrollOffset, layout.maxOffset, horizontalBar(layout.scrollOffset, layout.maxOffset, 10)),
 	}
+	if result.Truncated && result.Limit > 0 {
+		statusParts = append(statusParts, fmt.Sprintf("limited to %d rows", result.Limit))
+	}
 	lines = append(lines, strings.Repeat("─", width))
 	lines = append(lines, styles.Subtitle.Render(strings.Join(statusParts, "  ")))
 

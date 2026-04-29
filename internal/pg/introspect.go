@@ -6,14 +6,14 @@ import (
 
 	"github.com/g0p43r/tui_psql/internal/domain"
 	"github.com/g0p43r/tui_psql/internal/errs"
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func ListTables(conn *pgx.Conn) ([]domain.DBObject, error) {
+func ListTables(pool *pgxpool.Pool) ([]domain.DBObject, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	rows, err := conn.Query(ctx, `
+	rows, err := pool.Query(ctx, `
 		select
 			n.nspname as table_schema,
 			c.relname as table_name,

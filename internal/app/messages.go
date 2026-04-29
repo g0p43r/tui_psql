@@ -2,12 +2,12 @@ package app
 
 import (
 	"github.com/g0p43r/tui_psql/internal/domain"
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type connectSuccessMsg struct {
 	profile domain.ConnectionProfile
-	conn    *pgx.Conn
+	pool    *pgxpool.Pool
 }
 
 type connectErrorMsg struct {
@@ -15,35 +15,49 @@ type connectErrorMsg struct {
 }
 
 type tablesLoadedMsg struct {
-	tables []domain.DBObject
+	requestID int
+	tables    []domain.DBObject
 }
 
 type tablesLoadErrorMsg struct {
-	err error
+	requestID int
+	err       error
 }
 
 type previewLoadedMsg struct {
-	table  domain.DBObject
-	result domain.QueryResult
+	requestID int
+	table     domain.DBObject
+	result    domain.QueryResult
 }
 
 type previewLoadErrorMsg struct {
-	table domain.DBObject
-	err   error
+	requestID int
+	table     domain.DBObject
+	err       error
 }
 
 type sqlExecutedMsg struct {
+	sessionID      int
 	queryType      domain.SQLQueryType
 	editorMode     string
+	queryWorkbench bool
 	newTableSchema string
 	newTableName   string
+	targetSchema   string
+	targetTable    string
+	sql            string
 	result         domain.QueryResult
 }
 
 type sqlExecuteErrorMsg struct {
-	queryType  domain.SQLQueryType
-	editorMode string
-	err        error
+	sessionID      int
+	queryType      domain.SQLQueryType
+	editorMode     string
+	queryWorkbench bool
+	targetSchema   string
+	targetTable    string
+	sql            string
+	err            error
 }
 
 type profilesLoadedMsg struct {
