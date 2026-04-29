@@ -12,6 +12,47 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+func TypeName(oid uint32) string {
+	switch oid {
+	case pgtype.BoolOID:
+		return "boolean"
+	case pgtype.Int2OID:
+		return "smallint"
+	case pgtype.Int4OID:
+		return "integer"
+	case pgtype.Int8OID:
+		return "bigint"
+	case pgtype.Float4OID:
+		return "real"
+	case pgtype.Float8OID:
+		return "double precision"
+	case pgtype.NumericOID:
+		return "numeric"
+	case pgtype.TextOID:
+		return "text"
+	case pgtype.VarcharOID:
+		return "varchar"
+	case pgtype.BPCharOID:
+		return "char"
+	case pgtype.UUIDOID:
+		return "uuid"
+	case pgtype.JSONOID:
+		return "json"
+	case pgtype.JSONBOID:
+		return "jsonb"
+	case pgtype.DateOID:
+		return "date"
+	case pgtype.TimestampOID:
+		return "timestamp"
+	case pgtype.TimestamptzOID:
+		return "timestamptz"
+	case pgtype.ByteaOID:
+		return "bytea"
+	default:
+		return fmt.Sprintf("oid:%d", oid)
+	}
+}
+
 func Value(oid uint32, value any) string {
 	if value == nil {
 		return "NULL"

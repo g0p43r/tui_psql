@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/g0p43r/tui_psql/internal/domain"
+	"github.com/g0p43r/tui_psql/internal/errs"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -22,7 +23,7 @@ func Connect(profile domain.ConnectionProfile) (*pgx.Conn, error) {
 
 	cfg, err := pgx.ParseConfig(connString)
 	if err != nil {
-		return nil, fmt.Errorf("invalid connection config: %w", err)
+		return nil, errs.E(errs.CodeConnect, "pg.Connect.ParseConfig", "Invalid connection configuration.", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -30,12 +31,12 @@ func Connect(profile domain.ConnectionProfile) (*pgx.Conn, error) {
 
 	conn, err := pgx.ConnectConfig(ctx, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("connect failed: %w", err)
+		return nil, errs.E(errs.CodeConnect, "pg.Connect.ConnectConfig", "Connection failed.", err)
 	}
 
 	if err := conn.Ping(ctx); err != nil {
 		_ = conn.Close(context.Background())
-		return nil, fmt.Errorf("ping failed: %w", err)
+		return nil, errs.E(errs.CodeConnect, "pg.Connect.Ping", "Connected but ping failed.", err)
 	}
 
 	return conn, nil

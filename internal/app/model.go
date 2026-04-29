@@ -5,6 +5,7 @@ import (
 
 	"github.com/g0p43r/tui_psql/internal/config"
 	"github.com/g0p43r/tui_psql/internal/domain"
+	"github.com/g0p43r/tui_psql/internal/errs"
 	"github.com/g0p43r/tui_psql/internal/pg"
 	"github.com/g0p43r/tui_psql/internal/ui/screens/browser"
 	"github.com/g0p43r/tui_psql/internal/ui/screens/connection"
@@ -84,7 +85,7 @@ func (m Model) handleAppMessage(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case connectSuccessMsg:
 		return m.handleConnectSuccess(msg)
 	case connectErrorMsg:
-		m.connection.SetStatus(connection.StatusError, msg.err.Error())
+		m.connection.SetStatus(connection.StatusError, errs.Message(msg.err))
 		return m, nil, true
 	case profilesLoadedMsg:
 		return m.handleProfilesLoaded(msg)
@@ -100,7 +101,7 @@ func (m Model) handleAppMessage(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case tablesLoadedMsg:
 		return m.handleTablesLoaded(msg)
 	case tablesLoadErrorMsg:
-		m.browser.SetStatus(msg.err.Error())
+		m.browser.SetStatus(errs.Message(msg.err))
 		return m, nil, true
 	case browser.TableSelectedMsg:
 		if m.activeConn == nil {
@@ -128,11 +129,23 @@ func (m Model) handleAppMessage(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.screen = screenConnection
 		m.connection.SetStatus(connection.StatusConnecting, "Reconnecting to database...")
 		return m, connectCmd(profile), true
+	case browser.ExecuteSQLMsg:
+		if m.activeConn == nil {
+			m.browser.SetEditorStatus("No active connection.", true)
+			return m, nil, true
+		}
+		m.browser.SetEditorStatus("Executing query...", false)
+		return m, executeSQLCmd(m.activeConn, msg.SQL, msg.QueryType), true
 	case previewLoadedMsg:
 		m.browser.SetPreview(msg.table, msg.result)
 		return m, nil, true
 	case previewLoadErrorMsg:
-		m.browser.SetPreviewError(msg.table, msg.err.Error())
+		m.browser.SetPreviewError(msg.table, errs.Message(msg.err))
+		return m, nil, true
+	case sqlExecutedMsg:
+		return m.handleSQLExecuted(msg)
+	case sqlExecuteErrorMsg:
+		m.browser.SetEditorStatus(errs.Message(msg.err), true)
 		return m, nil, true
 	}
 	return m, nil, false
@@ -154,7 +167,7 @@ func (m Model) handleConnectSuccess(msg connectSuccessMsg) (Model, tea.Cmd, bool
 
 func (m Model) handleProfilesLoaded(msg profilesLoadedMsg) (Model, tea.Cmd, bool) {
 	if msg.err != nil {
-		m.connection.SetStatus(connection.StatusError, msg.err.Error())
+		m.connection.SetStatus(connection.StatusError, errs.Message(msg.err))
 		return m, nil, true
 	}
 	m.connection.SetProfiles(msg.profiles)
@@ -163,7 +176,7 @@ func (m Model) handleProfilesLoaded(msg profilesLoadedMsg) (Model, tea.Cmd, bool
 
 func (m Model) handleProfileDeleted(msg profileDeletedMsg) (Model, tea.Cmd, bool) {
 	if msg.err != nil {
-		m.connection.SetStatus(connection.StatusError, msg.err.Error())
+		m.connection.SetStatus(connection.StatusError, errs.Message(msg.err))
 		return m, nil, true
 	}
 	m.connection.SetProfiles(msg.profiles)
@@ -179,6 +192,28 @@ func (m Model) handleTablesLoaded(msg tablesLoadedMsg) (Model, tea.Cmd, bool) {
 	m.browser.SetTables(msg.tables)
 	if selected, ok := m.browser.SelectedTable(); ok && m.activeConn != nil {
 		m.browser.SetPreviewStatus("Loading rows...")
+		return m, previewTableCmd(m.activeConn, selected), true
+	}
+	return m, nil, true
+}
+
+func (m Model) handleSQLExecuted(msg sqlExecutedMsg) (Model, tea.Cmd, bool) {
+	if len(msg.result.Columns) > 0 {
+		table := domain.DBObject{Schema: "query", Name: "result", Type: domain.ObjectView}
+		m.browser.SetPreview(table, msg.result)
+		m.browser.SetEditorStatus(
+			"Query OK: "+msg.result.CommandTag,
+			false,
+		)
+		return m, nil, true
+	}
+
+	m.browser.SetEditorStatus(
+		"Statement OK: "+msg.result.CommandTag,
+		false,
+	)
+	if selected, ok := m.browser.SelectedTable(); ok && m.activeConn != nil {
+		m.browser.SetPreviewStatus("Reloading table preview...")
 		return m, previewTableCmd(m.activeConn, selected), true
 	}
 	return m, nil, true
@@ -238,6 +273,23 @@ func previewTableCmd(conn *pgx.Conn, table domain.DBObject) tea.Cmd {
 		return previewLoadedMsg{
 			table:  table,
 			result: result,
+		}
+	}
+}
+
+func executeSQLCmd(conn *pgx.Conn, sql string, queryType domain.SQLQueryType) tea.Cmd {
+	return func() tea.Msg {
+		result, err := pg.ExecuteSQL(conn, sql, queryType)
+		if err != nil {
+			return sqlExecuteErrorMsg{
+				queryType: queryType,
+				err:       err,
+			}
+		}
+
+		return sqlExecutedMsg{
+			queryType: queryType,
+			result:    result,
 		}
 	}
 }

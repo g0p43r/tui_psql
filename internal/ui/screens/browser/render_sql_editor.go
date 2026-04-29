@@ -2,6 +2,7 @@ package browser
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -23,9 +24,19 @@ func (m Model) sqlEditorView(width, height int) string {
 
 	lines := []string{
 		styles.Title.Render(title),
-		styles.Subtitle.Render("Esc: close  Ctrl+I/Ctrl+U/Ctrl+D: regenerate template"),
+		styles.Subtitle.Render(fmt.Sprintf("Type: %s", strings.ToUpper(string(m.EditorType())))),
+		styles.Subtitle.Render("F5/Ctrl+Enter: execute  Ctrl+T: change type  Esc: close"),
 		"",
 		m.editor.View(),
+	}
+
+	if m.editorStatus != "" {
+		status := styles.Subtitle.Render(m.editorStatus)
+		if m.editorStatusErr {
+			status = lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Render(m.editorStatus)
+		}
+		lines = append(lines, "")
+		lines = append(lines, status)
 	}
 
 	return lipgloss.NewStyle().
@@ -38,29 +49,30 @@ func (m Model) sqlEditorView(width, height int) string {
 		Render(strings.Join(lines, "\n"))
 }
 
-func buildSQLTemplate(mode editorMode, table domain.DBObject, columns []string, row []string) string {
+func buildSQLTemplate(mode editorMode, table domain.DBObject, columns []string, columnTypes []string, row []string) string {
 	switch mode {
 	case editorInsert:
-		return buildInsertTemplate(table, columns)
+		return buildInsertTemplate(table, columns, columnTypes)
 	case editorUpdate:
-		return buildUpdateTemplate(table, columns, row)
+		return buildUpdateTemplate(table, columns, columnTypes, row)
 	case editorDelete:
-		return buildDeleteTemplate(table, columns, row)
+		return buildDeleteTemplate(table, columns, columnTypes, row)
 	default:
 		return ""
 	}
 }
 
-func buildInsertTemplate(table domain.DBObject, columns []string) string {
+func buildInsertTemplate(table domain.DBObject, columns []string, columnTypes []string) string {
 	if len(columns) == 0 {
 		columns = []string{"column_name"}
 	}
 
 	columnLines := make([]string, 0, len(columns))
 	valueLines := make([]string, 0, len(columns))
-	for _, col := range columns {
+	for i, col := range columns {
+		colType := columnTypeAt(columnTypes, i)
 		columnLines = append(columnLines, "    "+col)
-		valueLines = append(valueLines, "    /* "+col+" */ NULL")
+		valueLines = append(valueLines, fmt.Sprintf("    /* %s %s */ NULL", col, colType))
 	}
 
 	return fmt.Sprintf(
@@ -72,43 +84,50 @@ func buildInsertTemplate(table domain.DBObject, columns []string) string {
 	)
 }
 
-func buildUpdateTemplate(table domain.DBObject, columns []string, row []string) string {
+func buildUpdateTemplate(table domain.DBObject, columns []string, columnTypes []string, row []string) string {
 	if len(columns) == 0 {
 		columns = []string{"column_name"}
 	}
 
 	setLines := make([]string, 0, len(columns))
 	for i, col := range columns {
+		colType := columnTypeAt(columnTypes, i)
 		current := currentValuePreview(row, i)
-		setLines = append(setLines, fmt.Sprintf("    %s = /* current: %s */ NULL", col, current))
+		setLines = append(setLines, fmt.Sprintf("    %s = /* %s current: %s */ %s", col, colType, current, sqlValue(row, i)))
 	}
 
 	whereColumn := columns[0]
+	whereType := columnTypeAt(columnTypes, 0)
 	whereValue := currentValuePreview(row, 0)
 
 	return fmt.Sprintf(
-		"UPDATE %s.%s\nSET\n%s\nWHERE\n    %s = /* current: %s */ NULL;",
+		"UPDATE %s.%s\nSET\n%s\nWHERE\n    %s = /* %s current: %s */ %s;",
 		table.Schema,
 		table.Name,
 		strings.Join(setLines, ",\n"),
 		whereColumn,
+		whereType,
 		whereValue,
+		sqlValue(row, 0),
 	)
 }
 
-func buildDeleteTemplate(table domain.DBObject, columns []string, row []string) string {
+func buildDeleteTemplate(table domain.DBObject, columns []string, columnTypes []string, row []string) string {
 	whereColumn := "id"
 	if len(columns) > 0 {
 		whereColumn = columns[0]
 	}
+	whereType := columnTypeAt(columnTypes, 0)
 	whereValue := currentValuePreview(row, 0)
 
 	return fmt.Sprintf(
-		"DELETE FROM %s.%s\nWHERE\n    %s = /* current: %s */ NULL;",
+		"DELETE FROM %s.%s\nWHERE\n    %s = /* %s current: %s */ %s;",
 		table.Schema,
 		table.Name,
 		whereColumn,
+		whereType,
 		whereValue,
+		sqlValue(row, 0),
 	)
 }
 
@@ -121,4 +140,37 @@ func currentValuePreview(row []string, index int) string {
 		return value
 	}
 	return "unknown"
+}
+
+func columnTypeAt(columnTypes []string, index int) string {
+	if index >= 0 && index < len(columnTypes) && columnTypes[index] != "" {
+		return columnTypes[index]
+	}
+	return "unknown"
+}
+
+func sqlValue(row []string, index int) string {
+	if index < 0 || index >= len(row) {
+		return "NULL"
+	}
+
+	value := strings.TrimSpace(row[index])
+	if value == "" || strings.EqualFold(value, "NULL") {
+		return "NULL"
+	}
+	if strings.EqualFold(value, "true") || strings.EqualFold(value, "false") {
+		return strings.ToUpper(value)
+	}
+	if isNumeric(value) {
+		return value
+	}
+
+	escaped := strings.ReplaceAll(value, "'", "''")
+	return "'" + escaped + "'"
+}
+
+var numericPattern = regexp.MustCompile(`^[+-]?(\d+(\.\d+)?|\.\d+)$`)
+
+func isNumeric(value string) bool {
+	return numericPattern.MatchString(value)
 }

@@ -2,10 +2,10 @@ package pg
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/g0p43r/tui_psql/internal/domain"
+	"github.com/g0p43r/tui_psql/internal/errs"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -20,7 +20,7 @@ func ListTables(conn *pgx.Conn) ([]domain.DBObject, error) {
 		order by table_schema, table_name
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("load tables: %w", err)
+		return nil, errs.E(errs.CodeQuery, "pg.ListTables.Query", "Failed to load tables.", err)
 	}
 	defer rows.Close()
 
@@ -31,7 +31,7 @@ func ListTables(conn *pgx.Conn) ([]domain.DBObject, error) {
 		var tableType string
 
 		if err := rows.Scan(&schema, &name, &tableType); err != nil {
-			return nil, fmt.Errorf("scan table row: %w", err)
+			return nil, errs.E(errs.CodeQuery, "pg.ListTables.Scan", "Failed to read table metadata.", err)
 		}
 
 		objectType := domain.ObjectTable
@@ -47,7 +47,7 @@ func ListTables(conn *pgx.Conn) ([]domain.DBObject, error) {
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate tables: %w", err)
+		return nil, errs.E(errs.CodeQuery, "pg.ListTables.Iterate", "Failed to iterate tables.", err)
 	}
 
 	return tables, nil

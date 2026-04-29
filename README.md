@@ -2,7 +2,7 @@
 
 TUI-клиент для PostgreSQL на Go.
 
-Сейчас это рабочий MVP: можно подключиться к базе, сохранить профиль подключения, переключаться между профилями, просматривать таблицы, смотреть результат в viewer и открывать SQL-шаблоны для `INSERT`, `UPDATE`, `DELETE`.
+Сейчас это рабочий MVP: можно подключиться к базе, сохранить профиль подключения, переключаться между профилями, просматривать таблицы, смотреть результат в viewer, выполнять SQL из editor и работать с шаблонами `INSERT`/`UPDATE`/`DELETE`.
 
 ## Возможности
 
@@ -21,6 +21,10 @@ TUI-клиент для PostgreSQL на Go.
   - `INSERT`
   - `UPDATE`
   - `DELETE`
+  - выполнение SQL (`SELECT` и `INSERT/UPDATE/DELETE/DDL`)
+  - выбор типа запроса в editor (`auto/select/insert/update/delete/exec`)
+  - типы колонок в комментариях шаблона
+  - для `UPDATE`/`DELETE` подставляются текущие значения выбранной строки
 - lifecycle подключения:
   - disconnect
   - reconnect
@@ -124,6 +128,8 @@ Layout:
 - `F2` — открыть SQL template для `INSERT`
 - `F3` — открыть SQL template для `UPDATE`
 - `F4` — открыть SQL template для `DELETE`
+- `F5` или `Ctrl+Enter` — выполнить SQL из editor
+- `Ctrl+T` — переключить тип SQL-запроса в editor
 - `Ctrl+P` — вернуться к выбору профилей
 - `Ctrl+X` — disconnect
 - `Ctrl+R` — reconnect
@@ -131,13 +137,20 @@ Layout:
 
 ### SQL Editor
 
-Пока это только editor с шаблонами, без выполнения SQL.
-
 Сейчас:
 
 - открывается как modal overlay
 - заполняется шаблоном по выбранной таблице
-- для `UPDATE` / `DELETE` использует текущую выбранную строку как подсказку в комментариях
+- выполняет SQL в активной сессии (`F5` / `Ctrl+Enter`)
+- поддерживает явный тип запроса (`Ctrl+T`):
+  - `auto`
+  - `select`
+  - `insert`
+  - `update`
+  - `delete`
+  - `exec`
+- для `UPDATE` и `DELETE` подставляет текущие значения выбранной строки в SQL
+- показывает статус выполнения и ошибки прямо в editor
 - `Esc` закрывает editor
 
 ## Структура проекта
@@ -147,6 +160,7 @@ cmd/tui_psql/                  # entrypoint
 internal/app/                  # root Bubble Tea model и orchestration
 internal/config/               # profiles storage
 internal/domain/               # доменные типы
+internal/errs/                 # унифицированные ошибки приложения
 internal/pg/                   # connect, preview, introspection
 internal/pg/formatter/         # приведение PostgreSQL значений к строкам для UI
 internal/ui/screens/connection/
@@ -159,12 +173,12 @@ internal/ui/styles/            # общие lipgloss стили
 - UI не ходит в PostgreSQL напрямую
 - подключение и запросы запускаются через `tea.Cmd`
 - formatter PostgreSQL-типов вынесен отдельно
+- ошибки унифицированы через общий пакет `internal/errs`
 - экраны разделены на `model/update/view`
 - browser разбит на отдельные render-файлы
 
 ## Ограничения текущего MVP
 
-- SQL editor пока не выполняет запросы
 - viewer сейчас работает на preview `SELECT * ... LIMIT 50`
 - нет history запросов
 - нет сохранения активной session state
@@ -172,7 +186,6 @@ internal/ui/styles/            # общие lipgloss стили
 
 ## Следующие шаги
 
-- выполнение SQL из editor
-- отдельный result mode для `INSERT/UPDATE/DELETE`
-- `rows affected` и SQL errors в editor flow
 - query history
+- отдельный SQL history panel (повтор последних запросов)
+- расширенная поддержка schema-qualified объектов в editor flow

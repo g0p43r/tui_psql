@@ -16,6 +16,10 @@ type TableSelectedMsg struct {
 type OpenProfilesMsg struct{}
 type DisconnectMsg struct{}
 type ReconnectMsg struct{}
+type ExecuteSQLMsg struct {
+	SQL       string
+	QueryType domain.SQLQueryType
+}
 
 type editorMode string
 
@@ -41,22 +45,25 @@ const (
 )
 
 type Model struct {
-	tables        []domain.DBObject
-	selected      int
-	width         int
-	height        int
-	status        string
-	previewStatus string
-	previewTable  *domain.DBObject
-	preview       domain.QueryResult
-	previewError  string
-	focus         FocusArea
-	selectedRow   int
-	rowOffset     int
-	colOffset     int
-	mode          ViewMode
-	editorMode    editorMode
-	editor        textarea.Model
+	tables          []domain.DBObject
+	selected        int
+	width           int
+	height          int
+	status          string
+	previewStatus   string
+	previewTable    *domain.DBObject
+	preview         domain.QueryResult
+	previewError    string
+	focus           FocusArea
+	selectedRow     int
+	rowOffset       int
+	colOffset       int
+	mode            ViewMode
+	editorMode      editorMode
+	editor          textarea.Model
+	editorType      domain.SQLQueryType
+	editorStatus    string
+	editorStatusErr bool
 }
 
 func New() Model {
@@ -66,6 +73,7 @@ func New() Model {
 		focus:         FocusTables,
 		mode:          ModeBrowse,
 		editor:        newEditor(),
+		editorType:    domain.QueryTypeAuto,
 	}
 }
 
@@ -178,11 +186,16 @@ func (m *Model) OpenEditor(mode editorMode) {
 	m.editor = newEditor()
 	m.editorMode = mode
 	m.mode = ModeEditor
-	m.editor.SetValue(buildSQLTemplate(mode, table, m.preview.Columns, m.currentRow()))
+	m.editorType = queryTypeForEditorMode(mode)
+	m.editorStatus = ""
+	m.editorStatusErr = false
+	m.editor.SetValue(buildSQLTemplate(mode, table, m.preview.Columns, m.preview.ColumnTypes, m.currentRow()))
 }
 
 func (m *Model) CloseEditor() {
 	m.mode = ModeBrowse
+	m.editorStatus = ""
+	m.editorStatusErr = false
 }
 
 func (m *Model) SetEditorSize(width, height int) {
@@ -220,6 +233,32 @@ func (m Model) IsRecordOpen() bool {
 	return m.mode == ModeRecord
 }
 
+func (m Model) EditorType() domain.SQLQueryType {
+	return m.editorType
+}
+
+func (m *Model) CycleEditorType() {
+	switch m.editorType {
+	case domain.QueryTypeAuto:
+		m.editorType = domain.QueryTypeSelect
+	case domain.QueryTypeSelect:
+		m.editorType = domain.QueryTypeInsert
+	case domain.QueryTypeInsert:
+		m.editorType = domain.QueryTypeUpdate
+	case domain.QueryTypeUpdate:
+		m.editorType = domain.QueryTypeDelete
+	case domain.QueryTypeDelete:
+		m.editorType = domain.QueryTypeExec
+	default:
+		m.editorType = domain.QueryTypeAuto
+	}
+}
+
+func (m *Model) SetEditorStatus(status string, isError bool) {
+	m.editorStatus = status
+	m.editorStatusErr = isError
+}
+
 func (m *Model) resetPreviewState() {
 	m.preview = domain.QueryResult{}
 	m.previewError = ""
@@ -231,4 +270,17 @@ func (m *Model) resetPreviewNavigation() {
 	m.selectedRow = 0
 	m.rowOffset = 0
 	m.colOffset = 0
+}
+
+func queryTypeForEditorMode(mode editorMode) domain.SQLQueryType {
+	switch mode {
+	case editorInsert:
+		return domain.QueryTypeInsert
+	case editorUpdate:
+		return domain.QueryTypeUpdate
+	case editorDelete:
+		return domain.QueryTypeDelete
+	default:
+		return domain.QueryTypeAuto
+	}
 }

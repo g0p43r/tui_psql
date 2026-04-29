@@ -32,6 +32,16 @@ type previewLoadErrorMsg struct {
 	err   error
 }
 
+type sqlExecutedMsg struct {
+	queryType domain.SQLQueryType
+	result    domain.QueryResult
+}
+
+type sqlExecuteErrorMsg struct {
+	queryType domain.SQLQueryType
+	err       error
+}
+
 type profilesLoadedMsg struct {
 	profiles []domain.ConnectionProfile
 	err      error

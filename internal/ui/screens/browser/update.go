@@ -20,9 +20,22 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) handleEditorModeKey(msg tea.KeyMsg) (Model, tea.Cmd) {
-	if msg.String() == "esc" {
+	switch msg.String() {
+	case "esc":
 		m.CloseEditor()
 		return m, nil
+	case "ctrl+t":
+		m.CycleEditorType()
+		return m, nil
+	case "f5", "ctrl+enter", "ctrl+j":
+		sql := m.editor.Value()
+		m.SetEditorStatus("Executing query...", false)
+		return m, func() tea.Msg {
+			return ExecuteSQLMsg{
+				SQL:       sql,
+				QueryType: m.EditorType(),
+			}
+		}
 	}
 
 	var cmd tea.Cmd

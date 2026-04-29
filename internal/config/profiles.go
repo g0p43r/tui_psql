@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/g0p43r/tui_psql/internal/domain"
+	"github.com/g0p43r/tui_psql/internal/errs"
 )
 
 const (
@@ -26,12 +27,12 @@ func LoadProfiles() ([]domain.ConnectionProfile, error) {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("read profiles: %w", err)
+		return nil, errs.E(errs.CodeConfig, "config.LoadProfiles.ReadFile", "Failed to read saved profiles.", err)
 	}
 
 	var profiles []domain.ConnectionProfile
 	if err := json.Unmarshal(data, &profiles); err != nil {
-		return nil, fmt.Errorf("decode profiles: %w", err)
+		return nil, errs.E(errs.CodeConfig, "config.LoadProfiles.Unmarshal", "Saved profiles file is invalid.", err)
 	}
 
 	for i := range profiles {
@@ -66,16 +67,16 @@ func SaveProfile(profile domain.ConnectionProfile) ([]domain.ConnectionProfile, 
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, fmt.Errorf("create config dir: %w", err)
+		return nil, errs.E(errs.CodeConfig, "config.SaveProfile.MkdirAll", "Failed to create config directory.", err)
 	}
 
 	data, err := json.MarshalIndent(profiles, "", "  ")
 	if err != nil {
-		return nil, fmt.Errorf("encode profiles: %w", err)
+		return nil, errs.E(errs.CodeConfig, "config.SaveProfile.Marshal", "Failed to encode profiles.", err)
 	}
 
 	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return nil, fmt.Errorf("write profiles: %w", err)
+		return nil, errs.E(errs.CodeConfig, "config.SaveProfile.WriteFile", "Failed to write profiles.", err)
 	}
 
 	return profiles, nil
@@ -103,18 +104,18 @@ func DeleteProfile(name string) ([]domain.ConnectionProfile, error) {
 
 	if len(profiles) == 0 {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			return nil, fmt.Errorf("remove profiles file: %w", err)
+			return nil, errs.E(errs.CodeConfig, "config.DeleteProfile.Remove", "Failed to remove profiles file.", err)
 		}
 		return profiles, nil
 	}
 
 	data, err := json.MarshalIndent(profiles, "", "  ")
 	if err != nil {
-		return nil, fmt.Errorf("encode profiles: %w", err)
+		return nil, errs.E(errs.CodeConfig, "config.DeleteProfile.Marshal", "Failed to encode profiles.", err)
 	}
 
 	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return nil, fmt.Errorf("write profiles: %w", err)
+		return nil, errs.E(errs.CodeConfig, "config.DeleteProfile.WriteFile", "Failed to write profiles.", err)
 	}
 
 	return profiles, nil
@@ -134,7 +135,7 @@ func NormalizeProfile(profile domain.ConnectionProfile) domain.ConnectionProfile
 func profilesPath() (string, error) {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
-		return "", fmt.Errorf("resolve user config dir: %w", err)
+		return "", errs.E(errs.CodeConfig, "config.profilesPath.UserConfigDir", "Failed to resolve user config directory.", err)
 	}
 
 	return filepath.Join(configDir, appDir, profilesFile), nil

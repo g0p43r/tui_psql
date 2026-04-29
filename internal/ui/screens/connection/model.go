@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/g0p43r/tui_psql/internal/domain"
+	"github.com/g0p43r/tui_psql/internal/errs"
 	"github.com/g0p43r/tui_psql/internal/ui/styles"
 )
 
@@ -121,20 +122,20 @@ func (m Model) Validate() error {
 	profile := m.Profile()
 
 	if profile.Host == "" {
-		return fmt.Errorf("host is required")
+		return errs.Validation("connection.Validate.Host", "Host is required.")
 	}
 	if profile.Port == "" {
-		return fmt.Errorf("port is required")
+		return errs.Validation("connection.Validate.Port", "Port is required.")
 	}
 	port, err := strconv.Atoi(profile.Port)
 	if err != nil || port < 1 || port > 65535 {
-		return fmt.Errorf("port must be a number between 1 and 65535")
+		return errs.Validation("connection.Validate.PortRange", "Port must be a number between 1 and 65535.")
 	}
 	if profile.Database == "" {
-		return fmt.Errorf("database is required")
+		return errs.Validation("connection.Validate.Database", "Database is required.")
 	}
 	if profile.User == "" {
-		return fmt.Errorf("user is required")
+		return errs.Validation("connection.Validate.User", "User is required.")
 	}
 
 	return nil

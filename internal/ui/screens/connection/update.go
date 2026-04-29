@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/g0p43r/tui_psql/internal/errs"
 )
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
@@ -62,7 +63,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 			if m.focus == len(m.fields)-1 {
 				if err := m.Validate(); err != nil {
-					m.SetStatus(StatusError, err.Error())
+					m.SetStatus(StatusError, errs.Message(err))
 					return m, nil
 				}
 				return m, func() tea.Msg { return SubmitMsg{} }
