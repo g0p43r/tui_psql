@@ -14,10 +14,19 @@ func ListTables(conn *pgx.Conn) ([]domain.DBObject, error) {
 	defer cancel()
 
 	rows, err := conn.Query(ctx, `
-		select table_schema, table_name, table_type
-		from information_schema.tables
-		where table_schema not in ('pg_catalog', 'information_schema')
-		order by table_schema, table_name
+		select
+			n.nspname as table_schema,
+			c.relname as table_name,
+			case
+				when c.relkind in ('v', 'm') then 'VIEW'
+				else 'BASE TABLE'
+			end as table_type
+		from pg_catalog.pg_class c
+		join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+		where c.relkind in ('r', 'p', 'v', 'm', 'f')
+		  and n.nspname not in ('pg_catalog', 'information_schema')
+		  and n.nspname not like 'pg_toast%'
+		order by n.nspname, c.relname
 	`)
 	if err != nil {
 		return nil, errs.E(errs.CodeQuery, "pg.ListTables.Query", "Failed to load tables.", err)

@@ -2,7 +2,7 @@
 
 TUI-клиент для PostgreSQL на Go.
 
-Сейчас это рабочий MVP: можно подключиться к базе, сохранить профиль подключения, переключаться между профилями, просматривать таблицы, смотреть результат в viewer, выполнять SQL из editor и работать с шаблонами `INSERT`/`UPDATE`/`DELETE`.
+Сейчас это рабочий MVP: можно подключиться к базе, сохранить профиль подключения, переключаться между профилями, просматривать таблицы, смотреть результат в viewer, выполнять SQL из editor и работать с шаблонами `INSERT`/`UPDATE`/`DELETE`/`CREATE TABLE`/`ALTER TABLE`/`DROP TABLE`.
 
 ## Возможности
 
@@ -21,6 +21,9 @@ TUI-клиент для PostgreSQL на Go.
   - `INSERT`
   - `UPDATE`
   - `DELETE`
+  - `CREATE TABLE`
+  - `ALTER TABLE`
+  - `DROP TABLE`
   - выполнение SQL (`SELECT` и `INSERT/UPDATE/DELETE/DDL`)
   - выбор типа запроса в editor (`auto/select/insert/update/delete/exec`)
   - типы колонок в комментариях шаблона
@@ -128,6 +131,9 @@ Layout:
 - `F2` — открыть SQL template для `INSERT`
 - `F3` — открыть SQL template для `UPDATE`
 - `F4` — открыть SQL template для `DELETE`
+- `F6` — открыть SQL template для `CREATE TABLE` (только при фокусе на списке таблиц)
+- `F7` — открыть SQL template для `ALTER TABLE` (только при фокусе на списке таблиц)
+- `F8` — открыть SQL template для `DROP TABLE` (только при фокусе на списке таблиц)
 - `F5` или `Ctrl+Enter` — выполнить SQL из editor
 - `Ctrl+T` — переключить тип SQL-запроса в editor
 - `Ctrl+P` — вернуться к выбору профилей
@@ -150,6 +156,7 @@ Layout:
   - `delete`
   - `exec`
 - для `UPDATE` и `DELETE` подставляет текущие значения выбранной строки в SQL
+- для `CREATE/ALTER/DROP` после успешного выполнения делает reconnect, чтобы сразу обновить список таблиц
 - показывает статус выполнения и ошибки прямо в editor
 - `Esc` закрывает editor
 

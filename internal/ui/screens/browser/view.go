@@ -111,7 +111,8 @@ func (m Model) rightPane(width, height int) string {
 	lines = append(lines, renderTable(m.preview, width, tableHeight, m.selectedRow, m.rowOffset, m.colOffset)...)
 	lines = append(lines, "")
 	lines = append(lines, styles.Help.Render(fitCell("Tab switch, Up/Down rows, Left/Right cols, Enter record", width)))
-	lines = append(lines, styles.Help.Render(fitCell("F2/F3/F4 SQL, Ctrl+P profiles, Ctrl+X disconnect, Ctrl+R reconnect", width)))
+	lines = append(lines, styles.Help.Render(fitCell("F2/F3/F4 row SQL, F6 create, F7 alter, F8 drop", width)))
+	lines = append(lines, styles.Help.Render(fitCell("Ctrl+P profiles, Ctrl+X disconnect, Ctrl+R reconnect", width)))
 	return fitPaneContent(lines, height)
 }
 

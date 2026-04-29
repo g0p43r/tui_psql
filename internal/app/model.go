@@ -134,8 +134,11 @@ func (m Model) handleAppMessage(msg tea.Msg) (Model, tea.Cmd, bool) {
 			m.browser.SetEditorStatus("No active connection.", true)
 			return m, nil, true
 		}
+		if msg.NewTableName != "" {
+			m.browser.SetPendingSelection(msg.NewTableSchema, msg.NewTableName)
+		}
 		m.browser.SetEditorStatus("Executing query...", false)
-		return m, executeSQLCmd(m.activeConn, msg.SQL, msg.QueryType), true
+		return m, executeSQLCmd(m.activeConn, msg.SQL, msg.QueryType, string(msg.EditorMode), msg.NewTableSchema, msg.NewTableName), true
 	case previewLoadedMsg:
 		m.browser.SetPreview(msg.table, msg.result)
 		return m, nil, true
@@ -212,9 +215,24 @@ func (m Model) handleSQLExecuted(msg sqlExecutedMsg) (Model, tea.Cmd, bool) {
 		"Statement OK: "+msg.result.CommandTag,
 		false,
 	)
-	if selected, ok := m.browser.SelectedTable(); ok && m.activeConn != nil {
-		m.browser.SetPreviewStatus("Reloading table preview...")
-		return m, previewTableCmd(m.activeConn, selected), true
+	if msg.editorMode == "create" || msg.editorMode == "alter" || msg.editorMode == "drop" {
+		m.browser.CloseEditor()
+		if m.current != nil {
+			profile := *m.current
+			m.closeActiveConn()
+			m.browser.SetStatus("Reconnecting to refresh schema objects...")
+			return m, connectCmd(profile), true
+		}
+	}
+	if m.activeConn != nil {
+		if selected, ok := m.browser.SelectedTable(); ok {
+			m.browser.SetPreviewStatus("Reloading table preview...")
+			return m, tea.Batch(
+				listTablesCmd(m.activeConn),
+				previewTableCmd(m.activeConn, selected),
+			), true
+		}
+		return m, listTablesCmd(m.activeConn), true
 	}
 	return m, nil, true
 }
@@ -277,19 +295,23 @@ func previewTableCmd(conn *pgx.Conn, table domain.DBObject) tea.Cmd {
 	}
 }
 
-func executeSQLCmd(conn *pgx.Conn, sql string, queryType domain.SQLQueryType) tea.Cmd {
+func executeSQLCmd(conn *pgx.Conn, sql string, queryType domain.SQLQueryType, editorMode, newTableSchema, newTableName string) tea.Cmd {
 	return func() tea.Msg {
 		result, err := pg.ExecuteSQL(conn, sql, queryType)
 		if err != nil {
 			return sqlExecuteErrorMsg{
-				queryType: queryType,
-				err:       err,
+				queryType:  queryType,
+				editorMode: editorMode,
+				err:        err,
 			}
 		}
 
 		return sqlExecutedMsg{
-			queryType: queryType,
-			result:    result,
+			queryType:      queryType,
+			editorMode:     editorMode,
+			newTableSchema: newTableSchema,
+			newTableName:   newTableName,
+			result:         result,
 		}
 	}
 }

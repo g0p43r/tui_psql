@@ -2,6 +2,8 @@ package browser
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
@@ -17,8 +19,11 @@ type OpenProfilesMsg struct{}
 type DisconnectMsg struct{}
 type ReconnectMsg struct{}
 type ExecuteSQLMsg struct {
-	SQL       string
-	QueryType domain.SQLQueryType
+	SQL            string
+	QueryType      domain.SQLQueryType
+	EditorMode     editorMode
+	NewTableSchema string
+	NewTableName   string
 }
 
 type editorMode string
@@ -27,6 +32,9 @@ const (
 	editorInsert editorMode = "insert"
 	editorUpdate editorMode = "update"
 	editorDelete editorMode = "delete"
+	editorCreate editorMode = "create"
+	editorAlter  editorMode = "alter"
+	editorDrop   editorMode = "drop"
 )
 
 type FocusArea string
@@ -64,6 +72,8 @@ type Model struct {
 	editorType      domain.SQLQueryType
 	editorStatus    string
 	editorStatusErr bool
+	pendingSchema   string
+	pendingTable    string
 }
 
 func New() Model {
@@ -89,6 +99,16 @@ func (m *Model) SetStatus(status string) {
 func (m *Model) SetTables(tables []domain.DBObject) {
 	m.tables = tables
 	m.selected = 0
+	if m.pendingTable != "" {
+		for i, t := range tables {
+			if t.Name == m.pendingTable && (m.pendingSchema == "" || t.Schema == m.pendingSchema) {
+				m.selected = i
+				break
+			}
+		}
+		m.pendingSchema = ""
+		m.pendingTable = ""
+	}
 	m.resetPreviewState()
 	if len(tables) == 0 {
 		m.status = "No tables found."
@@ -179,7 +199,7 @@ func newEditor() textarea.Model {
 
 func (m *Model) OpenEditor(mode editorMode) {
 	table, ok := m.SelectedTable()
-	if !ok {
+	if !ok && mode != editorCreate {
 		return
 	}
 
@@ -189,6 +209,28 @@ func (m *Model) OpenEditor(mode editorMode) {
 	m.editorType = queryTypeForEditorMode(mode)
 	m.editorStatus = ""
 	m.editorStatusErr = false
+	if mode == editorCreate {
+		schema := "public"
+		if ok && table.Schema != "" {
+			schema = table.Schema
+		}
+		m.editor.SetValue(buildCreateTableTemplate(schema))
+		return
+	}
+	if mode == editorAlter {
+		if !ok {
+			return
+		}
+		m.editor.SetValue(buildAlterTableTemplate(table))
+		return
+	}
+	if mode == editorDrop {
+		if !ok {
+			return
+		}
+		m.editor.SetValue(buildDropTableTemplate(table))
+		return
+	}
 	m.editor.SetValue(buildSQLTemplate(mode, table, m.preview.Columns, m.preview.ColumnTypes, m.currentRow()))
 }
 
@@ -259,6 +301,25 @@ func (m *Model) SetEditorStatus(status string, isError bool) {
 	m.editorStatusErr = isError
 }
 
+func (m *Model) SetPendingSelection(schema, table string) {
+	m.pendingSchema = strings.TrimSpace(schema)
+	m.pendingTable = strings.TrimSpace(table)
+}
+
+func parseCreateTableTarget(sql string) (schema, table string, ok bool) {
+	trimmed := strings.TrimSpace(sql)
+	re := regexp.MustCompile(`(?is)^create\s+table\s+(if\s+not\s+exists\s+)?([a-zA-Z_][\w]*)(?:\.([a-zA-Z_][\w]*))?`)
+	match := re.FindStringSubmatch(trimmed)
+	if len(match) == 0 {
+		return "", "", false
+	}
+
+	if match[3] != "" {
+		return match[2], match[3], true
+	}
+	return "", match[2], true
+}
+
 func (m *Model) resetPreviewState() {
 	m.preview = domain.QueryResult{}
 	m.previewError = ""
@@ -280,6 +341,12 @@ func queryTypeForEditorMode(mode editorMode) domain.SQLQueryType {
 		return domain.QueryTypeUpdate
 	case editorDelete:
 		return domain.QueryTypeDelete
+	case editorCreate:
+		return domain.QueryTypeExec
+	case editorAlter:
+		return domain.QueryTypeExec
+	case editorDrop:
+		return domain.QueryTypeExec
 	default:
 		return domain.QueryTypeAuto
 	}

@@ -33,13 +33,17 @@ type previewLoadErrorMsg struct {
 }
 
 type sqlExecutedMsg struct {
-	queryType domain.SQLQueryType
-	result    domain.QueryResult
+	queryType      domain.SQLQueryType
+	editorMode     string
+	newTableSchema string
+	newTableName   string
+	result         domain.QueryResult
 }
 
 type sqlExecuteErrorMsg struct {
-	queryType domain.SQLQueryType
-	err       error
+	queryType  domain.SQLQueryType
+	editorMode string
+	err        error
 }
 
 type profilesLoadedMsg struct {

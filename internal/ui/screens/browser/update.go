@@ -30,10 +30,14 @@ func (m Model) handleEditorModeKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "f5", "ctrl+enter", "ctrl+j":
 		sql := m.editor.Value()
 		m.SetEditorStatus("Executing query...", false)
+		schema, table, _ := parseCreateTableTarget(sql)
 		return m, func() tea.Msg {
 			return ExecuteSQLMsg{
-				SQL:       sql,
-				QueryType: m.EditorType(),
+				SQL:            sql,
+				QueryType:      m.EditorType(),
+				EditorMode:     m.editorMode,
+				NewTableSchema: schema,
+				NewTableName:   table,
 			}
 		}
 	}
@@ -65,6 +69,21 @@ func (m Model) handleBrowseModeKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m.openEditor(editorUpdate)
 	case "f4":
 		return m.openEditor(editorDelete)
+	case "f6":
+		if m.focus != FocusTables {
+			return m, nil
+		}
+		return m.openEditor(editorCreate)
+	case "f7":
+		if m.focus != FocusTables {
+			return m, nil
+		}
+		return m.openEditor(editorAlter)
+	case "f8":
+		if m.focus != FocusTables {
+			return m, nil
+		}
+		return m.openEditor(editorDrop)
 	case "tab":
 		m.toggleFocus()
 	case "enter":

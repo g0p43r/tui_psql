@@ -20,6 +20,12 @@ func (m Model) sqlEditorView(width, height int) string {
 		title = "SQL Editor: UPDATE"
 	case editorDelete:
 		title = "SQL Editor: DELETE"
+	case editorCreate:
+		title = "SQL Editor: CREATE TABLE"
+	case editorAlter:
+		title = "SQL Editor: ALTER TABLE"
+	case editorDrop:
+		title = "SQL Editor: DROP TABLE"
 	}
 
 	lines := []string{
@@ -60,6 +66,35 @@ func buildSQLTemplate(mode editorMode, table domain.DBObject, columns []string, 
 	default:
 		return ""
 	}
+}
+
+func buildCreateTableTemplate(schema string) string {
+	return fmt.Sprintf(
+		"CREATE TABLE %s.new_table (\n    id uuid PRIMARY KEY,\n    name text NOT NULL,\n    created_at timestamptz NOT NULL DEFAULT now()\n);\n\n-- Example column type notes:\n-- uuid, text, varchar, integer, bigint, numeric, boolean, jsonb, timestamptz",
+		schema,
+	)
+}
+
+func buildAlterTableTemplate(table domain.DBObject) string {
+	return fmt.Sprintf(
+		"ALTER TABLE %s.%s\n    ADD COLUMN new_column text;\n\n-- Examples:\n-- ALTER TABLE %s.%s RENAME COLUMN old_name TO new_name;\n-- ALTER TABLE %s.%s DROP COLUMN obsolete_column;",
+		table.Schema,
+		table.Name,
+		table.Schema,
+		table.Name,
+		table.Schema,
+		table.Name,
+	)
+}
+
+func buildDropTableTemplate(table domain.DBObject) string {
+	return fmt.Sprintf(
+		"DROP TABLE IF EXISTS %s.%s;\n\n-- If the table has dependent objects, use:\n-- DROP TABLE IF EXISTS %s.%s CASCADE;",
+		table.Schema,
+		table.Name,
+		table.Schema,
+		table.Name,
+	)
 }
 
 func buildInsertTemplate(table domain.DBObject, columns []string, columnTypes []string) string {
