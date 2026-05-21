@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/g0p43r/tui_psql/internal/domain"
 	"github.com/g0p43r/tui_psql/internal/ui/styles"
@@ -256,6 +257,8 @@ func newEditor() textarea.Model {
 	editor.Prompt = ""
 	editor.CharLimit = 0
 	editor.ShowLineNumbers = true
+	editor.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	editor.BlurredStyle.CursorLine = lipgloss.NewStyle()
 	editor.SetWidth(80)
 	editor.SetHeight(20)
 	editor.Focus()
@@ -313,17 +316,15 @@ func (m *Model) CloseEditor() {
 }
 
 func (m *Model) SetEditorSize(width, height int) {
-	editorWidth := maxInt(40, width-16)
-	editorHeight := maxInt(8, (height-12)/2)
-	m.editor.SetWidth(editorWidth)
-	m.editor.SetHeight(editorHeight)
+	layout := newSQLEditorLayout(maxInt(80, width-4), maxInt(12, height-2), false)
+	m.editor.SetWidth(layout.paneContentWidth)
+	m.editor.SetHeight(layout.editorHeight)
 }
 
 func (m *Model) SetQueryWorkbenchEditorSize(width, height int) {
-	editorWidth := maxInt(40, width-styles.Panel.GetHorizontalFrameSize()-4)
-	usableHeight := maxInt(12, height-2)
-	topHeight := queryWorkbenchTopHeight(usableHeight)
-	editorHeight := maxInt(3, topHeight-styles.Panel.GetVerticalFrameSize()-3)
+	layout := newQueryWorkbenchLayout(maxInt(80, width-4), maxInt(12, height))
+	editorWidth := maxInt(1, layout.contentWidth)
+	editorHeight := maxInt(1, layout.editorHeight)
 	m.editor.SetWidth(editorWidth)
 	m.editor.SetHeight(editorHeight)
 }
@@ -501,10 +502,8 @@ func (m *Model) ensureResultRowVisible(viewportRows int) {
 }
 
 func (m Model) resultViewportRows() int {
-	usableHeight := maxInt(12, m.height)
-	topHeight := queryWorkbenchTopHeight(usableHeight)
-	bottomHeight := maxInt(6, usableHeight-topHeight)
-	return maxInt(1, bottomHeight-styles.Panel.GetVerticalFrameSize()-5)
+	layout := newQueryWorkbenchLayout(maxInt(80, m.width-4), maxInt(12, m.height))
+	return maxInt(1, layout.resultHeight-3)
 }
 
 func (m *Model) SetPendingSelection(schema, table string) {

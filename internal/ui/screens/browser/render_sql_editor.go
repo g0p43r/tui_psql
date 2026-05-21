@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/g0p43r/tui_psql/internal/domain"
 	"github.com/g0p43r/tui_psql/internal/ui/styles"
@@ -30,49 +31,82 @@ func (m Model) sqlEditorView(width, height int) string {
 		title = "SQL Editor: DROP TABLE"
 	}
 
-	editorBlockHeight := maxInt(8, (height-8)/2)
-	outputBlockHeight := maxInt(6, (height-8)-editorBlockHeight)
+	layout := newSQLEditorLayout(width, height, m.editorStatus != "")
 	editorPane := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("240")).
-		Height(editorBlockHeight).
-		Render(m.editor.View())
-
-	outputPane := m.editorOutputView(width-18, outputBlockHeight-2)
-	outputPane = lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Height(outputBlockHeight).
-		Render(outputPane)
+		Height(layout.editorHeight).
+		Render(fitSQLBlock(m.editor.View(), layout.paneContentWidth, layout.editorHeight))
 
 	lines := []string{
-		styles.Title.Render(title),
-		styles.Subtitle.Render(fmt.Sprintf("Type: %s", strings.ToUpper(string(m.EditorType())))),
-		styles.Subtitle.Render("Alt+Enter: execute  Ctrl+T: change type  Esc: close"),
+		styles.Title.Render(fitCell(title, layout.contentWidth)),
+		styles.Subtitle.Render(fitCell(fmt.Sprintf("Type: %s", strings.ToUpper(string(m.EditorType()))), layout.contentWidth)),
+		styles.Subtitle.Render(fitCell("Alt+Enter: execute  Ctrl+T: change type  Esc: close", layout.contentWidth)),
 		"",
-		styles.Subtitle.Render("Query"),
+		styles.Subtitle.Render(fitCell("Query", layout.contentWidth)),
 		editorPane,
-		styles.Subtitle.Render("Output"),
-		outputPane,
 	}
 
 	if m.editorStatus != "" {
-		status := styles.Subtitle.Render(m.editorStatus)
+		statusText := fitCell(m.editorStatus, layout.contentWidth)
+		status := styles.Subtitle.Render(statusText)
 		if m.editorStatusErr {
-			status = lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Render(m.editorStatus)
+			status = lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Render(statusText)
 		}
 		lines = append(lines, "")
 		lines = append(lines, status)
 	}
 
 	return lipgloss.NewStyle().
-		Width(maxInt(40, width-8)).
-		Height(maxInt(10, height-4)).
+		Width(layout.outerWidth).
+		Height(layout.outerHeight).
 		Border(lipgloss.DoubleBorder()).
 		BorderForeground(lipgloss.Color("212")).
 		Padding(1, 2).
-		Background(lipgloss.Color("235")).
 		Render(strings.Join(lines, "\n"))
+}
+
+type sqlEditorLayout struct {
+	outerWidth       int
+	outerHeight      int
+	contentWidth     int
+	paneContentWidth int
+	editorHeight     int
+}
+
+func newSQLEditorLayout(width, height int, hasStatus bool) sqlEditorLayout {
+	outerWidth := maxInt(40, width-8)
+	contentWidth := maxInt(1, outerWidth-4)
+	paneContentWidth := maxInt(1, contentWidth-2)
+
+	outerHeight := maxInt(10, height-4)
+	fixedRows := 7
+	if hasStatus {
+		fixedRows += 2
+	}
+
+	available := maxInt(2, outerHeight-fixedRows-2)
+	editorHeight := maxInt(1, available)
+
+	return sqlEditorLayout{
+		outerWidth:       outerWidth,
+		outerHeight:      outerHeight,
+		contentWidth:     contentWidth,
+		paneContentWidth: paneContentWidth,
+		editorHeight:     editorHeight,
+	}
+}
+
+func fitSQLBlock(value string, width, height int) string {
+	if height <= 0 {
+		return ""
+	}
+
+	lines := strings.Split(value, "\n")
+	for i, line := range lines {
+		lines[i] = ansi.Truncate(line, maxInt(1, width), "…")
+	}
+	return fitPaneContent(lines, height)
 }
 
 func (m Model) editorOutputView(width, height int) string {
